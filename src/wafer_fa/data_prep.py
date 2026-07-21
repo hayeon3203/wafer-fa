@@ -1,14 +1,29 @@
 import csv
+import pickle
+import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import pandas.core.indexes as _indexes
+import pandas.core.indexes.base as _indexes_base
+import pandas.core.indexes.range as _indexes_range
 from sklearn.model_selection import train_test_split
 
 from wafer_fa.labels import LABEL_TO_IDX
 
 RAW_PATH = Path("data/raw/LSWMD.pkl")
 OUT_DIR = Path("data/processed")
+
+# LSWMD.pkl was pickled under a pre-1.0 pandas (module layout was pandas.indexes.*,
+# now pandas.core.indexes.*), and under Python 2 (needs latin1 decoding).
+sys.modules.setdefault("pandas.indexes", _indexes)
+sys.modules.setdefault("pandas.indexes.base", _indexes_base)
+sys.modules.setdefault("pandas.indexes.range", _indexes_range)
+
+
+def _load_raw():
+    with open(RAW_PATH, "rb") as f:
+        return pickle.load(f, encoding="latin1")
 
 
 def _extract_label(failure_type):
@@ -23,7 +38,7 @@ def _extract_label(failure_type):
 
 
 def main():
-    df = pd.read_pickle(RAW_PATH)
+    df = _load_raw()
     df["label"] = df["failureType"].apply(_extract_label)
     labeled = df[df["label"].notna()].reset_index(drop=True)
 
