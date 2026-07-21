@@ -1,0 +1,3 @@
+# Frozen DINOv2-base backbone + MLP head, no fine-tuning
+
+We classify wafer maps using DINOv2-base as a frozen feature extractor with a small trainable MLP head on top, rather than fine-tuning the backbone. SemiFA reports 90% accuracy with this exact setup (214K trainable parameters) on a similar defect-classification task, so it's a validated starting point. Fine-tuning the backbone would need more GPU memory and training time, and risks overfitting on the smaller/imbalanced minority classes (e.g. Near-full has only ~100-200 labeled samples in WM-811K). If accuracy proves insufficient once we evaluate on the real WM-811K label set, unfreezing the last few backbone layers is the next lever to pull before reaching for a bigger backbone.

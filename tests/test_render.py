@@ -1,0 +1,18 @@
+import numpy as np
+from wafer_fa.render import render_wafer_map
+
+
+def test_render_shape_and_mode():
+    matrix = np.array([[0, 1, 2], [1, 1, 2], [0, 0, 1]])
+    img = render_wafer_map(matrix, size=224)
+    assert img.size == (224, 224)
+    assert img.mode == "RGB"
+
+
+def test_render_color_mapping():
+    matrix = np.array([[0, 1, 2], [0, 1, 2], [0, 1, 2]])  # square: no resize needed
+    img = render_wafer_map(matrix, size=3)
+    px = img.load()
+    assert px[0, 0] == (255, 255, 255)
+    assert px[1, 0] == (160, 160, 160)
+    assert px[2, 0] == (220, 30, 30)

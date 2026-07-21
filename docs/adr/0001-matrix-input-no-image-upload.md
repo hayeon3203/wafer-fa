@@ -1,0 +1,3 @@
+# Matrix input only, no real image-upload interface
+
+The original scope asked for "upload a wafer photo" in Streamlit. We're instead treating the raw die-level matrix (`.npy`) as the true input, matching the intended production source: a digital twin auto-collecting matrices from equipment, not a camera. The demo app picks a random `.npy` sample from the held-out test set and renders it to an image internally, purely for display — there is no user-facing file upload widget. This keeps the rendering function shared between the offline training-data prep step and the live inference path, and avoids building/maintaining a file-upload UI that doesn't reflect how the data will actually arrive in later stages.

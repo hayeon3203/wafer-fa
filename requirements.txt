@@ -1,0 +1,9 @@
+torch
+torchvision
+transformers
+scikit-learn
+streamlit
+numpy
+pandas
+pillow
+pytest
