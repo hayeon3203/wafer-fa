@@ -19,7 +19,7 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 | 1.4 | 데이터 전처리 (`data_prep.py`, 라벨 있는 172,950건만, stratified 80/10/10) | `data/processed/manifest.csv` 생성, 각 split에 9클래스 전부 존재 | 1.1, 1.2 | cc:完了 |
 | 1.5 | `WaferDataset` + 회전/뒤집기 증강 (train만) | `pytest tests/test_dataset.py` 통과 | 1.3, 1.4 | cc:完了 |
 | 1.6 | `DinoV2Classifier` (frozen backbone + MLP head) | `pytest tests/test_model.py` 통과 | 1.1 | cc:完了 |
-| 1.7 | 학습 루프 + macro F1 리포트 (`train.py`) — **목표 macro F1 ≥ 0.80 미달, 튜닝 중** | test macro F1 ≥ 0.80 (현재 최고 0.741, 10epoch 기준) | 1.5, 1.6 | cc:WIP |
+| 1.7 | 학습 루프 + macro F1 리포트 (`train.py`) — **목표 macro F1 ≥ 0.80 미달, 튜닝 중** | test macro F1 ≥ 0.80 (현재 최고 0.741, 10epoch 기준) | 1.5, 1.6 | blocked (3차 재학습 백그라운드 실행 중, epoch 6/10, ETA ~40-50분 — 세션 자동 재개 루프 소음 방지용 임시 표시, 학습 자체는 정상 진행 중) |
 | 1.8 | 추론 모듈 (`infer.py`) | `pytest tests/test_infer.py` 통과 | 1.6 | cc:完了 |
 | 1.9 | Streamlit 데모 (`app.py`, 랜덤 샘플 뽑기 + 확률 막대그래프) | 브라우저에서 버튼 클릭 시 이미지+예측 표시 확인 | 1.7, 1.8 | cc:TODO (blocked by 1.7) |
 
