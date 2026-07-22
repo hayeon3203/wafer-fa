@@ -17,3 +17,14 @@ def render_wafer_map(matrix: np.ndarray, size: int = 224) -> Image.Image:
     if img.size != (size, size):
         img = img.resize((size, size), Image.BILINEAR)
     return img
+
+
+def compute_die_yield(matrix: np.ndarray) -> float:
+    """Fraction of good (non-defect) dies among all real dies on the wafer.
+
+    Background cells (value 0, no die present) are excluded from the total.
+    """
+    normal = int(np.count_nonzero(matrix == 1))
+    defect = int(np.count_nonzero(matrix == 2))
+    total = normal + defect
+    return normal / total if total else 0.0

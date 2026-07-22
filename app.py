@@ -1,3 +1,5 @@
+import base64
+import io
 import random
 from pathlib import Path
 
@@ -7,7 +9,7 @@ import streamlit as st
 
 from wafer_fa.infer import classify_matrix
 from wafer_fa.relay import run_relay
-from wafer_fa.render import render_wafer_map
+from wafer_fa.render import compute_die_yield, render_wafer_map
 from wafer_fa.telemetry import send_classification_telemetry
 
 PROCESSED_DIR = Path("data/processed")
@@ -53,11 +55,20 @@ if st.button("랜덤 샘플 뽑기"):
     st.subheader("해결책 제안")
     st.write(relay_result["recipe"])
 
+    image_buf = io.BytesIO()
+    image.save(image_buf, format="PNG")
+    wafer_image_b64 = base64.b64encode(image_buf.getvalue()).decode("ascii")
+
     send_classification_telemetry(
         lot_id=row["lot_id"],
         wafer_index=int(row["wafer_index"]),
         defect_label=predicted,
         confidence=probs[predicted],
         probs=probs,
+        die_yield=compute_die_yield(matrix),
+        description=relay_result["description"],
+        root_cause=relay_result["root_cause"],
         severity=relay_result["severity"],
+        recipe=relay_result["recipe"],
+        wafer_image_b64=wafer_image_b64,
     )

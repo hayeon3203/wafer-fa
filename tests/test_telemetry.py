@@ -30,6 +30,24 @@ def test_send_classification_telemetry_posts_payload(monkeypatch):
     assert kwargs["json"]["prob_Center"] == 0.9
 
 
+def test_send_classification_telemetry_includes_relay_fields(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = True
+        telemetry.send_classification_telemetry(
+            lot_id="lot1", wafer_index=1, defect_label="Center",
+            confidence=0.9, probs={"Center": 0.9},
+            die_yield=0.8, description="설명", root_cause="원인",
+            severity="MAJOR", recipe="해결책", wafer_image_b64="base64data",
+        )
+    payload = mock_post.call_args[1]["json"]
+    assert payload["die_yield"] == 0.8
+    assert payload["description"] == "설명"
+    assert payload["root_cause"] == "원인"
+    assert payload["recipe"] == "해결책"
+    assert payload["wafer_image"] == "base64data"
+
+
 def test_send_classification_telemetry_network_error_returns_false(monkeypatch):
     monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
     with patch.object(telemetry.requests, "post", side_effect=requests.RequestException("boom")):
