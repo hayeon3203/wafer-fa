@@ -15,5 +15,5 @@ def render_wafer_map(matrix: np.ndarray, size: int = 224) -> Image.Image:
         rgb[matrix == value] = color
     img = Image.fromarray(rgb, mode="RGB")
     if img.size != (size, size):
-        img = img.resize((size, size), Image.NEAREST)
+        img = img.resize((size, size), Image.BILINEAR)
     return img

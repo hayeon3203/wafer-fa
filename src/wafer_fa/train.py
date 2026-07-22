@@ -43,9 +43,10 @@ def main(epochs: int = 10, batch_size: int = 32, lr: float = 1e-3):
     train_ds = WaferDataset(MANIFEST, "train", PROCESSED_DIR, processor)
     val_ds = WaferDataset(MANIFEST, "val", PROCESSED_DIR, processor)
     test_ds = WaferDataset(MANIFEST, "test", PROCESSED_DIR, processor)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size)
-    test_loader = DataLoader(test_ds, batch_size=batch_size)
+    loader_kwargs = dict(num_workers=8, pin_memory=(device == "cuda"), persistent_workers=True)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, **loader_kwargs)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, **loader_kwargs)
 
     train_labels = train_ds.rows["label"].map(LABEL_TO_IDX).to_numpy()
     class_weights = compute_class_weight(

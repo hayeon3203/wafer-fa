@@ -3,3 +3,5 @@ data/
 checkpoints/
 __pycache__/
 *.pyc
+.claude/
+out/

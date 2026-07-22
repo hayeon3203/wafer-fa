@@ -7,9 +7,9 @@ Spec skip reason: product contract (defect taxonomy, input format, model/metric 
 team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하나씩 확정했으며, TeamAgent 다중 시점 리뷰는 필요 없다고 판단)
 ---
 
-## Phase 1: DINOv2 + 簡易分類器（Stage 1）
+## Phase 1: DINOv2 + 간이 분류기（Stage 1）
 
-目的: 웨이퍼 맵(다이 격자) 보고 9종 불량 유형(또는 정상) 분류. Streamlit으로 즉시 결과 확인.
+목적: 웨이퍼 맵(다이 격자) 보고 9종 불량 유형(또는 정상) 분류. Streamlit으로 즉시 결과 확인.
 
 | Task | 내용 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
