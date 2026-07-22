@@ -42,6 +42,7 @@ def test_send_classification_telemetry_includes_relay_fields(monkeypatch):
         )
     payload = mock_post.call_args[1]["json"]
     assert payload["die_yield"] == 0.8
+    assert payload["die_yield_pct"] == 80.0
     assert payload["description"] == "설명"
     assert payload["root_cause"] == "원인"
     assert payload["recipe"] == "해결책"

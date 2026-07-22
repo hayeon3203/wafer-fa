@@ -1,6 +1,8 @@
-"""One-time setup: create the wafer-fa custom widget types + the 3-tab dashboard
-(Monitoring / Root Cause / Process) in ThingsBoard. Re-running creates duplicates
-(no upsert) -- only meant to be run once against a fresh tenant.
+"""One-time setup: create the wafer-fa custom widget types + two dashboards in
+ThingsBoard -- "Wafer Overview" (control-room style, mirrors data/dashboard_sample2.png)
+and "Wafer Detail" (lot/pattern drill-down, mirrors data/dashboard_sample.png).
+Re-running creates duplicates (no upsert) -- only meant to be run once against a
+fresh tenant.
 """
 import json
 import os
@@ -24,7 +26,7 @@ def login():
 
 
 def create_widget_type(token, name, description, template_html, template_css,
-                        controller_script, default_config, size_x=8, size_y=5):
+                        controller_script, size_x=8, size_y=5):
     headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     body = {
         "name": name,
@@ -39,7 +41,9 @@ def create_widget_type(token, name, description, template_html, template_css,
             "controllerScript": controller_script,
             "settingsSchema": "{}",
             "dataKeySettingsSchema": "{}",
-            "defaultConfig": json.dumps(default_config),
+            "defaultConfig": json.dumps(
+                {"datasources": [], "showTitle": True, "title": name, "settings": {}}
+            ),
         },
     }
     resp = requests.post(f"{THINGSBOARD_URL}/api/widgetType", headers=headers, json=body)
@@ -47,6 +51,12 @@ def create_widget_type(token, name, description, template_html, template_css,
     return resp.json()["fqn"]
 
 
+# ---------------------------------------------------------------------------
+# Custom widget: Lot Panel (search + list only; selection feeds Lot Detail widget
+# via a shared in-widget click -> both widgets query the SAME lot_pattern_counts
+# attribute independently, so this one is presentational selection + everything
+# below reacts through its own copy of the data using window-level state).
+# ---------------------------------------------------------------------------
 LOT_ANALYSIS_HTML = """
 <div class="lot-wrap">
   <div class="lot-panel">
@@ -249,9 +259,99 @@ self.onResize = function() {};
 self.onDestroy = function() {};
 """
 
+CLASS_OVERVIEW_HTML = """<div class="co-wrap"><div class="co-bars"></div></div>"""
 
-def data_key(name, key_type="timeseries", label=None):
-    return {"name": name, "type": key_type, "label": label or name, "settings": {}}
+CLASS_OVERVIEW_CSS = """
+.co-wrap { height: 100%; padding: 8px 16px; box-sizing: border-box; overflow-y: auto; font-family: Roboto, sans-serif; }
+.co-row { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
+.co-label { width: 70px; flex-shrink: 0; }
+.co-bar-bg { flex: 1; background: #f0f0f0; border-radius: 3px; margin: 0 8px; height: 14px; }
+.co-bar { background: #e53935; height: 100%; border-radius: 3px; }
+.co-count { width: 46px; text-align: right; }
+"""
+
+CLASS_OVERVIEW_JS = """
+self.onInit = function() { render(); };
+self.onDataUpdated = function() { render(); };
+
+function render() {
+    var container = self.ctx.$container[0];
+    if (!container) return;
+    var barsEl = container.querySelector('.co-bars');
+    var lotCounts = {};
+    if (self.ctx.data && self.ctx.data[0] && self.ctx.data[0].data && self.ctx.data[0].data.length) {
+        var latest = self.ctx.data[0].data[self.ctx.data[0].data.length - 1];
+        try { lotCounts = JSON.parse(latest[1]); } catch (e) { lotCounts = {}; }
+    }
+    var totals = {};
+    Object.keys(lotCounts).forEach(function(lot) {
+        var counts = lotCounts[lot];
+        Object.keys(counts).forEach(function(cls) {
+            totals[cls] = (totals[cls] || 0) + counts[cls];
+        });
+    });
+    var entries = Object.keys(totals).map(function(k) { return [k, totals[k]]; })
+        .sort(function(a, b) { return b[1] - a[1]; });
+    var maxCount = entries.length ? entries[0][1] : 1;
+    barsEl.innerHTML = '';
+    entries.forEach(function(e) {
+        var pct = Math.round((e[1] / maxCount) * 100);
+        var row = document.createElement('div');
+        row.className = 'co-row';
+        row.innerHTML = '<span class="co-label">' + e[0] + '</span>' +
+            '<div class="co-bar-bg"><div class="co-bar" style="width:' + pct + '%"></div></div>' +
+            '<span class="co-count">' + e[1] + '</span>';
+        barsEl.appendChild(row);
+    });
+}
+
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
+WAFER_GALLERY_HTML = """<div class="wg-wrap"></div>"""
+
+WAFER_GALLERY_CSS = """
+.wg-wrap { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; height: 100%; overflow-y: auto; box-sizing: border-box; font-family: Roboto, sans-serif; }
+.wg-item { width: 90px; text-align: center; }
+.wg-item img { width: 80px; height: 80px; border: 1px solid #eee; border-radius: 4px; }
+.wg-cap { font-size: 11px; color: #555; margin-top: 4px; }
+.wg-sub { color: #999; }
+"""
+
+WAFER_GALLERY_JS = """
+self.onInit = function() { render(); };
+self.onDataUpdated = function() { render(); };
+
+function render() {
+    var container = self.ctx.$container[0];
+    if (!container) return;
+    var wrap = container.querySelector('.wg-wrap');
+    var samples = [];
+    if (self.ctx.data && self.ctx.data[0] && self.ctx.data[0].data && self.ctx.data[0].data.length) {
+        var latest = self.ctx.data[0].data[self.ctx.data[0].data.length - 1];
+        try { samples = JSON.parse(latest[1]); } catch (e) { samples = []; }
+    }
+    wrap.innerHTML = '';
+    samples.forEach(function(s) {
+        var item = document.createElement('div');
+        item.className = 'wg-item';
+        item.innerHTML = '<img src="data:image/png;base64,' + s.image + '" />' +
+            '<div class="wg-cap">' + s.label + '<br/><span class="wg-sub">' + s.lot_id + ' #' + s.wafer_index + '</span></div>';
+        wrap.appendChild(item);
+    });
+}
+
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
+
+def data_key(name, key_type="timeseries", label=None, extra=None):
+    dk = {"name": name, "type": key_type, "label": label or name, "settings": {}}
+    if extra:
+        dk.update(extra)
+    return dk
 
 
 def entity_datasource(alias_id, keys):
@@ -272,34 +372,170 @@ def widget(type_full_fqn, widget_type, size_x, size_y, row, col, config):
     }
 
 
-def main():
-    token = login()
-
-    lot_analysis_fqn = create_widget_type(
-        token, "Wafer-FA Lot Analysis", "Lot select + per-pattern count table + trend bars",
-        LOT_ANALYSIS_HTML, LOT_ANALYSIS_CSS, LOT_ANALYSIS_JS,
-        {"datasources": [], "showTitle": True, "title": "Lot Analysis", "settings": {}},
-        size_x=12, size_y=8,
-    )
-    slider_fqn = create_widget_type(
-        token, "Wafer-FA Threshold Slider", "Writable model confidence threshold slider",
-        SLIDER_HTML, SLIDER_CSS, SLIDER_JS,
-        {"datasources": [], "showTitle": True, "title": "Model Threshold", "settings": {}},
-        size_x=6, size_y=3,
-    )
-
-    alias_id = str(uuid.uuid4())
-    entity_aliases = {
-        alias_id: {
-            "id": alias_id,
-            "alias": "Wafer-FA Pipeline Device",
-            "filter": {
-                "type": "singleEntity",
-                "singleEntity": {"entityType": "DEVICE", "id": DEVICE_ID},
-                "resolveMultiple": False,
+def make_dashboard(title, alias_id, widgets):
+    layout = {wid: {"sizeX": w["sizeX"], "sizeY": w["sizeY"], "row": w["row"], "col": w["col"]}
+              for wid, w in widgets.items()}
+    return {
+        "title": title,
+        "configuration": {
+            "widgets": widgets,
+            "states": {
+                "default": {
+                    "name": title,
+                    "root": True,
+                    "layouts": {
+                        "main": {
+                            "widgets": layout,
+                            "gridSettings": {"backgroundColor": "#fff", "columns": 24, "margin": 10},
+                        }
+                    },
+                }
             },
-        }
+            "entityAliases": {
+                alias_id: {
+                    "id": alias_id,
+                    "alias": "Wafer-FA Pipeline Device",
+                    "filter": {
+                        "type": "singleEntity",
+                        "singleEntity": {"entityType": "DEVICE", "id": DEVICE_ID},
+                        "resolveMultiple": False,
+                    },
+                }
+            },
+            "settings": {},
+        },
     }
+
+
+def save_dashboard(token, dashboard):
+    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    resp = requests.post(f"{THINGSBOARD_URL}/api/dashboard", headers=headers, json=dashboard)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def build_overview_dashboard(alias_id, class_overview_fqn):
+    widgets = {}
+
+    placeholder_css = (
+        ".ph { display:flex; align-items:center; justify-content:center; height:100%;"
+        " font-size:14px; color:#999; font-family: Roboto, sans-serif; text-align:center;"
+        " padding:16px; box-sizing:border-box; }"
+    )
+
+    def placeholder(text, size_x, size_y, row, col):
+        return widget(
+            "system.cards.html_card", "static", size_x, size_y, row, col,
+            {
+                "datasources": [], "showTitle": True, "title": text.split(" (")[0], "settings": {
+                    "cardCss": placeholder_css,
+                    "cardHtml": f"<div class='ph'>{text}</div>",
+                },
+            },
+        )
+
+    wid, w = widget(
+        class_overview_fqn, "latest", 6, 10, 0, 0,
+        {
+            "datasources": [entity_datasource(alias_id, [
+                data_key("lot_pattern_counts", "attribute", "lot_pattern_counts"),
+            ])],
+            "title": "결함 검출 개요 (Defect Detection)", "showTitle": True, "settings": {},
+        },
+    )
+    widgets[wid] = w
+
+    wid, w = widget(
+        "system.cards.html_value_card", "latest", 12, 10, 0, 6,
+        {
+            "datasources": [entity_datasource(alias_id, [
+                data_key("wafer_image", "timeseries", "wafer_image"),
+                data_key("defect_class", "timeseries", "defect_class"),
+                data_key("confidence", "timeseries", "confidence"),
+                data_key("die_yield_pct", "timeseries", "die_yield_pct"),
+                data_key("lot_id", "timeseries", "lot_id"),
+            ])],
+            "title": "Wafer Yield Map (최근 웨이퍼)", "showTitle": True,
+            "settings": {
+                "cardCss": (
+                    ".yield-wrap { display:flex; align-items:center; justify-content:space-around;"
+                    " height:100%; font-family: Roboto, sans-serif; padding:12px; box-sizing:border-box; }\n"
+                    ".yield-wrap img { max-height: 85%; border-radius: 50%; border: 4px solid #f0f0f0; }\n"
+                    ".yield-stat { text-align:center; }\n"
+                    ".yield-stat .big { font-size: 42px; font-weight: 300; color:#2e7d32; }\n"
+                    ".yield-stat .sub { font-size: 13px; color:#888; margin-top:6px; }"
+                ),
+                "cardHtml": (
+                    "<div class='yield-wrap'>"
+                    "<img src='data:image/png;base64,${wafer_image}' />"
+                    "<div class='yield-stat'><div class='big'>${die_yield_pct:1}%</div>"
+                    "<div class='sub'>Composite Yield</div>"
+                    "<div class='sub'>${defect_class} (${confidence:2}) / lot ${lot_id}</div></div>"
+                    "</div>"
+                ),
+            },
+        },
+    )
+    widgets[wid] = w
+
+    wid, w = widget(
+        "system.cards.html_value_card", "latest", 6, 10, 0, 18,
+        {
+            "datasources": [entity_datasource(alias_id, [
+                data_key("severity", "timeseries", "severity"),
+                data_key("root_cause", "timeseries", "root_cause"),
+                data_key("recipe", "timeseries", "recipe"),
+            ])],
+            "title": "Process Risk & Alerts (최근 원인분석)", "showTitle": True,
+            "settings": {
+                "cardCss": (
+                    ".pr { padding:12px; font-family: Roboto, sans-serif; font-size:13px; line-height:1.5; }\n"
+                    ".pr h4 { margin: 10px 0 2px; font-size:12px; color:#888; text-transform:uppercase; }"
+                ),
+                "cardHtml": (
+                    "<div class='pr'><h4>심각도</h4><p><b>${severity}</b></p>"
+                    "<h4>원인 가설</h4><p>${root_cause}</p>"
+                    "<h4>권장 조치</h4><p>${recipe}</p></div>"
+                ),
+            },
+        },
+    )
+    widgets[wid] = w
+
+    wid, w = placeholder(
+        "설비/공정 텔레메트리 (Phase 3 예정 — 챔버 온도, 로봇 상태 등 합성 장비 로그 연동 후 채워짐)",
+        6, 6, 10, 0,
+    )
+    widgets[wid] = w
+
+    wid, w = placeholder(
+        "공정 위험 지표 (Phase 3 예정 — 실시간 이상탐지 알림)",
+        6, 6, 10, 18,
+    )
+    widgets[wid] = w
+
+    wid, w = placeholder(
+        "공정 단계 타임라인 (Phase 3 예정 — SECS/GEM 합성 로그 기반 공정 진행률)",
+        12, 6, 10, 6,
+    )
+    widgets[wid] = w
+
+    return make_dashboard("Wafer Overview", alias_id, widgets)
+
+
+def build_detail_dashboard(alias_id, lot_analysis_fqn, slider_fqn, wafer_gallery_fqn):
+    widgets = {}
+
+    wid, w = widget(
+        lot_analysis_fqn, "latest", 14, 9, 0, 0,
+        {
+            "datasources": [entity_datasource(alias_id, [
+                data_key("lot_pattern_counts", "attribute", "lot_pattern_counts"),
+            ])],
+            "title": "Lot 선택 / 패턴별 웨이퍼 수 / Lot Trend", "showTitle": True, "settings": {},
+        },
+    )
+    widgets[wid] = w
 
     composite_classes = ["Center", "Donut", "Edge-Loc", "Edge-Ring", "Loc",
                           "Random", "Scratch", "Near-full", "none"]
@@ -312,212 +548,99 @@ def main():
         data_key(f"composite_{c.replace('-', '_')}", "attribute", f"composite_{c.replace('-', '_')}")
         for c in composite_classes
     ]
-
-    widgets = {}
-
     wid, w = widget(
-        "cards.value_card", "latest", 6, 5, 0, 0,
-        {
-            "datasources": [entity_datasource(alias_id, [
-                {**data_key("die_yield", "timeseries", "die_yield"),
-                 "units": "%", "decimals": 1,
-                 "usePostProcessing": True,
-                 "postFuncBody": "return value * 100;"},
-            ])],
-            "title": "Die-level Yield (최근 웨이퍼)",
-            "showTitle": True,
-            "settings": {"labelPosition": "top", "layout": "square", "showLabel": True,
-                         "showIcon": True, "icon": "check_circle", "showDate": True},
-        },
-    )
-    widgets[wid] = w
-
-    wid, w = widget(
-        lot_analysis_fqn, "latest", 14, 8, 0, 6,
-        {
-            "datasources": [entity_datasource(alias_id, [
-                data_key("lot_pattern_counts", "attribute", "lot_pattern_counts"),
-            ])],
-            "title": "Lot 선택 / 패턴별 웨이퍼 수 / Lot Trend",
-            "showTitle": True,
-            "settings": {},
-        },
-    )
-    widgets[wid] = w
-
-    wid, w = widget(
-        slider_fqn, "latest", 6, 3, 5, 0,
-        {
-            "datasources": [entity_datasource(alias_id, [
-                data_key("confidence_threshold", "attribute", "confidence_threshold"),
-            ])],
-            "title": "모델 임계값 슬라이더",
-            "showTitle": True,
-            "settings": {},
-        },
-    )
-    widgets[wid] = w
-
-    monitoring_layout = {wid_: {"sizeX": w_["sizeX"], "sizeY": w_["sizeY"], "row": w_["row"], "col": w_["col"]}
-                          for wid_, w_ in widgets.items()}
-    monitoring_widget_ids = list(widgets.keys())
-
-    wid, w = widget(
-        "cards.html_value_card", "latest", 10, 8, 0, 0,
-        {
-            "datasources": [entity_datasource(alias_id, [
-                data_key("defect_class", "timeseries", "defect_class"),
-                data_key("confidence", "timeseries", "confidence"),
-                data_key("severity", "timeseries", "severity"),
-                data_key("description", "timeseries", "description"),
-                data_key("root_cause", "timeseries", "root_cause"),
-                data_key("recipe", "timeseries", "recipe"),
-            ])],
-            "title": "원인분석 (최근 웨이퍼 릴레이 결과)",
-            "showTitle": True,
-            "settings": {
-                "cardCss": (
-                    ".rc { padding: 16px; font-family: Roboto, sans-serif; overflow-y: auto; height: 100%;"
-                    " box-sizing: border-box; }\n"
-                    ".rc h3 { margin: 12px 0 4px; font-size: 13px; color: #888; text-transform: uppercase; }\n"
-                    ".rc p { margin: 0; font-size: 14px; line-height: 1.5; }"
-                ),
-                "cardHtml": (
-                    "<div class='rc'>"
-                    "<h3>예측 결함 / 신뢰도 / 심각도</h3>"
-                    "<p><b>${defect_class}</b> (${confidence:2}) — <b>${severity}</b></p>"
-                    "<h3>결함 설명</h3><p>${description}</p>"
-                    "<h3>원인 분석</h3><p>${root_cause}</p>"
-                    "<h3>해결책 제안</h3><p>${recipe}</p>"
-                    "</div>"
-                ),
-            },
-        },
-    )
-    widgets[wid] = w
-    root_cause_widgets = {wid: {"sizeX": w["sizeX"], "sizeY": w["sizeY"], "row": w["row"], "col": w["col"]}}
-    root_cause_widget_ids = [wid]
-
-    wid, w = widget(
-        "cards.html_value_card", "latest", 6, 8, 0, 10,
-        {
-            "datasources": [entity_datasource(alias_id, [
-                data_key("wafer_image", "timeseries", "wafer_image"),
-                data_key("lot_id", "timeseries", "lot_id"),
-                data_key("wafer_index", "timeseries", "wafer_index"),
-            ])],
-            "title": "개별 웨이퍼맵",
-            "showTitle": True,
-            "settings": {
-                "cardCss": (
-                    ".wf { display:flex; flex-direction:column; align-items:center; justify-content:center;"
-                    " height:100%; font-family: Roboto, sans-serif; }\n"
-                    ".wf img { max-width: 90%; max-height: 70%; border: 1px solid #eee; }\n"
-                    ".wf .cap { margin-top: 8px; font-size: 12px; color: #888; }"
-                ),
-                "cardHtml": (
-                    "<div class='wf'><img src='data:image/png;base64,${wafer_image}' />"
-                    "<div class='cap'>lot ${lot_id} / wafer #${wafer_index}</div></div>"
-                ),
-            },
-        },
-    )
-    widgets[wid] = w
-    root_cause_widgets[wid] = {"sizeX": w["sizeX"], "sizeY": w["sizeY"], "row": w["row"], "col": w["col"]}
-    root_cause_widget_ids.append(wid)
-
-    wid, w = widget(
-        "cards.html_value_card", "latest", 16, 8, 8, 0,
+        "system.cards.html_value_card", "latest", 10, 9, 0, 14,
         {
             "datasources": [entity_datasource(alias_id, composite_keys)],
-            "title": "Composite 웨이퍼맵 히트맵 (패턴별 평균)",
-            "showTitle": True,
+            "title": "Composite 웨이퍼맵 히트맵 (패턴별 평균)", "showTitle": True,
             "settings": {
                 "cardCss": (
-                    ".grid { display:flex; flex-wrap:wrap; gap:12px; padding:12px; font-family: Roboto, sans-serif; }\n"
-                    ".composite-item { width: 110px; text-align:center; }\n"
-                    ".composite-item img { width: 96px; height: 96px; border-radius: 50%; }\n"
-                    ".composite-label { font-size: 12px; color:#666; margin-top:4px; }"
+                    ".grid { display:flex; flex-wrap:wrap; gap:10px; padding:10px; font-family: Roboto, sans-serif; }\n"
+                    ".composite-item { width: 90px; text-align:center; }\n"
+                    ".composite-item img { width: 80px; height: 80px; border-radius: 50%; }\n"
+                    ".composite-label { font-size: 11px; color:#666; margin-top:4px; }"
                 ),
                 "cardHtml": f"<div class='grid'>{composite_imgs}</div>",
             },
         },
     )
     widgets[wid] = w
-    root_cause_widgets[wid] = {"sizeX": w["sizeX"], "sizeY": w["sizeY"], "row": w["row"], "col": w["col"]}
-    root_cause_widget_ids.append(wid)
 
     wid, w = widget(
-        "cards.html_card", "static", 12, 6, 0, 0,
+        wafer_gallery_fqn, "latest", 19, 8, 9, 0,
         {
-            "datasources": [],
-            "title": "장비 텔레메트리 상관관계 (Phase 3)",
-            "showTitle": True,
+            "datasources": [entity_datasource(alias_id, [
+                data_key("sample_wafers", "attribute", "sample_wafers"),
+            ])],
+            "title": "Wafers from Data (샘플 갤러리)", "showTitle": True, "settings": {},
+        },
+    )
+    widgets[wid] = w
+
+    wid, w = widget(
+        slider_fqn, "latest", 5, 4, 9, 19,
+        {
+            "datasources": [entity_datasource(alias_id, [
+                data_key("confidence_threshold", "attribute", "confidence_threshold"),
+            ])],
+            "title": "모델 임계값 슬라이더", "showTitle": True, "settings": {},
+        },
+    )
+    widgets[wid] = w
+
+    wid, w = widget(
+        "system.cards.html_value_card", "latest", 5, 4, 13, 19,
+        {
+            "datasources": [entity_datasource(alias_id, [
+                data_key("description", "timeseries", "description"),
+                data_key("severity", "timeseries", "severity"),
+            ])],
+            "title": "원인분석 (최근)", "showTitle": True,
             "settings": {
-                "cardCss": (
-                    ".ph { display:flex; align-items:center; justify-content:center; height:100%;"
-                    " font-size:16px; color:#999; font-family: Roboto, sans-serif; text-align:center; padding:24px;"
-                    " box-sizing:border-box; }"
-                ),
-                "cardHtml": (
-                    "<div class='ph'>Phase 3 예정 — 합성 장비 로그(SECS/GEM) 연동 후 "
-                    "결함-공정 상관관계 위젯이 이 탭에 채워집니다.<br/>"
-                    "(TimescaleDB hypertable equipment_telemetry 는 이미 준비되어 있음)</div>"
-                ),
+                "cardCss": ".rc2 { padding:10px; font-family: Roboto, sans-serif; font-size:12px; line-height:1.4; overflow-y:auto; height:100%; box-sizing:border-box; }",
+                "cardHtml": "<div class='rc2'><b>${severity}</b><p>${description}</p></div>",
             },
         },
     )
     widgets[wid] = w
-    process_widgets = {wid: {"sizeX": w["sizeX"], "sizeY": w["sizeY"], "row": w["row"], "col": w["col"]}}
 
-    dashboard = {
-        "title": "Wafer-FA Demo Dashboard",
-        "configuration": {
-            "widgets": widgets,
-            "states": {
-                "default": {
-                    "name": "Monitoring",
-                    "root": True,
-                    "layouts": {
-                        "main": {
-                            "widgets": {k: monitoring_layout[k] for k in monitoring_widget_ids},
-                            "gridSettings": {"backgroundColor": "#fff", "columns": 24, "margin": 10},
-                        }
-                    },
-                },
-                "root_cause": {
-                    "name": "Root Cause",
-                    "root": False,
-                    "layouts": {
-                        "main": {
-                            "widgets": root_cause_widgets,
-                            "gridSettings": {"backgroundColor": "#fff", "columns": 24, "margin": 10},
-                        }
-                    },
-                },
-                "process": {
-                    "name": "Process (Phase 3)",
-                    "root": False,
-                    "layouts": {
-                        "main": {
-                            "widgets": process_widgets,
-                            "gridSettings": {"backgroundColor": "#fff", "columns": 24, "margin": 10},
-                        }
-                    },
-                },
-            },
-            "entityAliases": entity_aliases,
-            "settings": {},
-        },
-    }
+    return make_dashboard("Wafer Detail", alias_id, widgets)
 
-    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    resp = requests.post(f"{THINGSBOARD_URL}/api/dashboard", headers=headers, json=dashboard)
-    resp.raise_for_status()
-    result = resp.json()
-    print("dashboard id:", result["id"]["id"])
+
+def main():
+    token = login()
+
+    lot_analysis_fqn = create_widget_type(
+        token, "Wafer-FA Lot Analysis", "Lot select + per-pattern count table + trend bars",
+        LOT_ANALYSIS_HTML, LOT_ANALYSIS_CSS, LOT_ANALYSIS_JS, size_x=12, size_y=8,
+    )
+    slider_fqn = create_widget_type(
+        token, "Wafer-FA Threshold Slider", "Writable model confidence threshold slider",
+        SLIDER_HTML, SLIDER_CSS, SLIDER_JS, size_x=6, size_y=3,
+    )
+    class_overview_fqn = create_widget_type(
+        token, "Wafer-FA Class Overview", "Global per-pattern defect counts, aggregated from lot_pattern_counts",
+        CLASS_OVERVIEW_HTML, CLASS_OVERVIEW_CSS, CLASS_OVERVIEW_JS, size_x=6, size_y=10,
+    )
+    wafer_gallery_fqn = create_widget_type(
+        token, "Wafer-FA Wafer Gallery", "Grid of real sample wafer thumbnails with predicted labels",
+        WAFER_GALLERY_HTML, WAFER_GALLERY_CSS, WAFER_GALLERY_JS, size_x=19, size_y=8,
+    )
+
+    alias_id = str(uuid.uuid4())
+
+    overview = build_overview_dashboard(alias_id, class_overview_fqn)
+    detail = build_detail_dashboard(alias_id, lot_analysis_fqn, slider_fqn, wafer_gallery_fqn)
+
+    overview_result = save_dashboard(token, overview)
+    detail_result = save_dashboard(token, detail)
+
+    print("overview dashboard id:", overview_result["id"]["id"])
+    print("detail dashboard id:", detail_result["id"]["id"])
     print("lot_analysis_fqn:", lot_analysis_fqn)
     print("slider_fqn:", slider_fqn)
+    print("class_overview_fqn:", class_overview_fqn)
+    print("wafer_gallery_fqn:", wafer_gallery_fqn)
 
 
 if __name__ == "__main__":

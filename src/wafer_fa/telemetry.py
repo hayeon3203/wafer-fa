@@ -36,6 +36,7 @@ def send_classification_telemetry(
     }
     if die_yield is not None:
         payload["die_yield"] = die_yield
+        payload["die_yield_pct"] = die_yield * 100
     if description is not None:
         payload["description"] = description
     if root_cause is not None:
