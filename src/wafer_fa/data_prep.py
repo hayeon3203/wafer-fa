@@ -61,10 +61,12 @@ def main():
                 "split": split_name,
                 "path": str(out_path.relative_to(OUT_DIR)),
                 "label": row["label"],
+                "lot_id": row["lotName"],
+                "wafer_index": int(row["waferIndex"]),
             })
 
     with open(OUT_DIR / "manifest.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["split", "path", "label"])
+        writer = csv.DictWriter(f, fieldnames=["split", "path", "label", "lot_id", "wafer_index"])
         writer.writeheader()
         writer.writerows(manifest_rows)
 

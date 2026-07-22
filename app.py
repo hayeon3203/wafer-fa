@@ -8,11 +8,22 @@ import streamlit as st
 from wafer_fa.infer import classify_matrix
 from wafer_fa.relay import run_relay
 from wafer_fa.render import render_wafer_map
+from wafer_fa.telemetry import send_classification_telemetry
 
 PROCESSED_DIR = Path("data/processed")
 MANIFEST = PROCESSED_DIR / "manifest.csv"
 
-st.set_page_config(page_title="Wafer Defect Classifier", layout="centered")
+st.set_page_config(
+    page_title="Wafer Defect Classifier", page_icon="assets/daol_icon.png", layout="centered"
+)
+# ponytail: hides Streamlit's default top-right "running" indicator (animated
+# running-person icon + stop button) since st.spinner below already shows
+# progress; relay runs take minutes so that indicator stays visible the whole
+# time otherwise. Cosmetic only, no effect on actual execution.
+st.markdown(
+    "<style>[data-testid='stStatusWidget'] { visibility: hidden; }</style>",
+    unsafe_allow_html=True,
+)
 st.title("Wafer Defect Classifier — Stage 1 + 2")
 
 manifest = pd.read_csv(MANIFEST)
@@ -41,3 +52,12 @@ if st.button("랜덤 샘플 뽑기"):
     st.write(relay_result["severity"])
     st.subheader("해결책 제안")
     st.write(relay_result["recipe"])
+
+    send_classification_telemetry(
+        lot_id=row["lot_id"],
+        wafer_index=int(row["wafer_index"]),
+        defect_label=predicted,
+        confidence=probs[predicted],
+        probs=probs,
+        severity=relay_result["severity"],
+    )

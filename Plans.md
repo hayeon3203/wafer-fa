@@ -58,14 +58,16 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 | Task | 내용 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 2.5.1 | ThingsBoard 인스턴스 세팅 (self-hosted) | ThingsBoard 관리 콘솔 접속 가능 | - | cc:완료 |
-| 2.5.2 | Stage 1/2 파이프라인용 REST/텔레메트리 연동 (분류 결과를 ThingsBoard로 전송) | ThingsBoard 대시보드에 분류 결과 데이터 수신 확인 | Phase 1, Phase 2, 2.5.1 | cc:TODO |
+| 2.5.1 | ThingsBoard 인스턴스 세팅 (self-hosted) | ThingsBoard 관리 콘솔 접속 가능 | - | cc:완료 [99718e6] |
+| 2.5.2 | Stage 1/2 파이프라인용 REST/텔레메트리 연동 (분류 결과를 ThingsBoard로 전송) | ThingsBoard 대시보드에 분류 결과 데이터 수신 확인 | Phase 1, Phase 2, 2.5.1 | cc:완료 |
 | 2.5.3 | 위젯 구성: Lot 선택 패널 / 패턴별 웨이퍼 수 테이블 / composite 웨이퍼맵 히트맵 / Lot Trend 차트 / 모델 임계값 슬라이더 | 참고 스크린샷과 동등한 5종 위젯이 대시보드에 표시 | 2.5.2 | cc:TODO |
 
 **주의**: 착수 전 사용자가 "필요하다" 확정한 뒤에만 진행 (Optional, 현재 backlog) — 2026-07-22 사용자가 Phase 2.5 착수 직접 지시, 확정됨.
 **UI 스타일 주의**: 제네릭 AI 룩 지양 — 사용자 확인된 피드백 ([[feedback-ui-style]] 메모리 참고).
 
 **진행 메모 (2.5.1)**: `docker-compose.yml`에 `thingsboard-postgres`(postgres:16-alpine, 내부 전용) + `thingsboard`(thingsboard/tb-node:4.3.1.3) 서비스 추가. 호스트 포트 충돌 회피 위해 웹 UI는 8080 대신 **8082**로 매핑(1883/7070/8883/5683-5688은 기본값 유지, 전부 미사용 포트 확인 후 배정). `docker compose run --rm -e INSTALL_TB=true -e LOAD_DEMO=false thingsboard`로 스키마+시스템 데이터 설치(데모 데이터는 제외, 실제 웨이퍼 데이터로 채울 예정이라 불필요) 후 `docker compose up -d thingsboard`로 기동. 검증: `GET /login` → 200, `POST /api/auth/login`(sysadmin 기본 계정)으로 JWT 토큰 발급 확인. 콘솔: `http://<host>:8082` (기본 계정 sysadmin@thingsboard.org / sysadmin — 데모 종료 후 교체 권장).
+
+**진행 메모 (2.5.2)**: `lot_id`/`wafer_index`는 원본 `LSWMD.pkl`에 있던 `lotName`/`waferIndex`를 Stage 1에서는 버렸었음 — `data_prep.py`를 확장해(동일 `random_state=42` split이라 기존 분할 그대로 유지) `manifest.csv`에 두 컬럼 추가, 재실행(14초, 172,950건). 런타임마다 원본 pkl을 다시 읽는 대신 오프라인에서 한 번만 계산해 데모 응답속도 확보. Tenant/Device 프로비저닝: sysadmin으로 tenant `wafer-fa` + tenant admin 계정 생성(LOAD_DEMO=false라 기본 tenant/customer 계정 없음, 자격증명은 비공개로 별도 보관·git 미커밋), device `wafer-fa-pipeline` 생성 후 access token 발급(토큰도 비공개 보관). `src/wafer_fa/telemetry.py`(`THINGSBOARD_DEVICE_TOKEN` env, HTTP device API `/api/v1/{token}/telemetry`, 네트워크 실패 시 예외 삼키고 False 반환 — 대시보드 다운돼도 데모 안 끊기게) 추가, `app.py`에서 릴레이 완료 직후(심각도 포함) 전송하도록 배선. `pytest tests/test_telemetry.py` 통과(no-token/성공/네트워크 예외 3 케이스, requests.post mock). 실제 전송 검증: 샘플 텔레메트리 전송 후 `GET /api/plugins/telemetry/DEVICE/{id}/values/timeseries`로 lot_id/wafer_index/defect_class/confidence/prob_*/severity 전부 수신 확인. Streamlit 서버(`172.16.4.228:8501`)를 `THINGSBOARD_DEVICE_TOKEN` env 포함해 재기동.
 
 ---
 
