@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 import torch
-from sklearn.metrics import classification_report, f1_score
+from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader
 from transformers import AutoImageProcessor
@@ -75,6 +75,8 @@ def main(epochs: int = 10, batch_size: int = 32, lr: float = 1e-3):
     model.head.load_state_dict(checkpoint["head_state_dict"])
     _, test_f1, test_preds, test_labels = run_epoch(model, test_loader, optimizer, criterion, device, train=False)
     print(classification_report(test_labels, test_preds, target_names=CLASSES))
+    test_accuracy = accuracy_score(test_labels, test_preds)
+    print(f"TEST accuracy = {test_accuracy:.3f}")
     print(f"TEST macro F1 = {test_f1:.3f} (target >= {TARGET_MACRO_F1}) -> {'PASS' if test_f1 >= TARGET_MACRO_F1 else 'FAIL'}")
 
 
