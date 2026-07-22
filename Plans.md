@@ -21,7 +21,7 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 | 1.6 | `DinoV2Classifier` (frozen backbone + MLP head) | `pytest tests/test_model.py` 통과 | 1.1 | cc:완료 |
 | 1.7 | 학습 루프 + macro F1 & accuracy 동시 리포트 (`train.py`) | test macro F1 ≥ 0.80 **그리고** accuracy 함께 기록 — 0.80 미달이나 사용자 지시로 현재 결과(run3: macro F1 0.758 / accuracy 0.94) 채택하고 다음 단계 진행, 추가 개선은 백로그로 이관 | 1.5, 1.6 | cc:완료 (목표 미달, 백로그 이관) |
 | 1.8 | 추론 모듈 (`infer.py`) | `pytest tests/test_infer.py` 통과 | 1.6 | cc:완료 |
-| 1.9 | Streamlit 데모 (`app.py`, 랜덤 샘플 뽑기 + 확률 막대그래프) | 브라우저에서 버튼 클릭 시 이미지+예측 표시 확인 | 1.7, 1.8 | cc:完了 (서버 기동+추론 파이프라인 확인, 사용자 지시로 block 해제) |
+| 1.9 | Streamlit 데모 (`app.py`, 랜덤 샘플 뽑기 + 확률 막대그래프) | 브라우저에서 버튼 클릭 시 이미지+예측 표시 확인 | 1.7, 1.8 | cc:완료 (서버 기동+추론 파이프라인 확인, 사용자 브라우저 접속 확인 완료) |
 
 **진행 메모**:
 - 1차(10epoch, 증강 전) → macro F1 0.741 / accuracy 0.93
