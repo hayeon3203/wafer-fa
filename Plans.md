@@ -13,20 +13,21 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 | Task | 내용 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 1.1 | 프로젝트 스캐폴딩 (venv, requirements, labels.py) | `pytest` 실행 가능, git repo 초기 커밋 존재 | - | cc:완了 |
-| 1.2 | WM-811K 데이터 확보 (LSWMD.pkl) | `data/raw/LSWMD.pkl` 로드 가능, 811,457행 확인 | - | cc:完了 |
-| 1.3 | 매트릭스→이미지 렌더러 (`render.py`) | `pytest tests/test_render.py` 통과 | 1.1 | cc:完了 |
+| 1.1 | 프로젝트 스캐폴딩 (venv, requirements, labels.py) | `pytest` 실행 가능, git repo 초기 커밋 존재 | - | cc:완료 |
+| 1.2 | WM-811K 데이터 확보 (LSWMD.pkl) | `data/raw/LSWMD.pkl` 로드 가능, 811,457행 확인 | - | cc:완료 |
+| 1.3 | 매트릭스→이미지 렌더러 (`render.py`) | `pytest tests/test_render.py` 통과 | 1.1 | cc:완료 |
 | 1.4 | 데이터 전처리 (`data_prep.py`, 라벨 있는 172,950건만, stratified 80/10/10) | `data/processed/manifest.csv` 생성, 각 split에 9클래스 전부 존재 | 1.1, 1.2 | cc:完了 |
-| 1.5 | `WaferDataset` + 회전/뒤집기 증강 (train만) | `pytest tests/test_dataset.py` 통과 | 1.3, 1.4 | cc:完了 |
-| 1.6 | `DinoV2Classifier` (frozen backbone + MLP head) | `pytest tests/test_model.py` 통과 | 1.1 | cc:完了 |
-| 1.7 | 학습 루프 + macro F1 & accuracy 동시 리포트 (`train.py`) — **목표 macro F1 ≥ 0.80 미달, 튜닝 중** | test macro F1 ≥ 0.80 **그리고** accuracy 함께 기록 (현재 최고: macro F1 0.741 / accuracy 0.93, 10epoch 기준) | 1.5, 1.6 | blocked (3차 재학습 백그라운드 실행 중, epoch 8/10, ETA ~15-20분 — 세션 자동 재개 루프 소음 방지용 임시 표시, 학습 자체는 정상 진행 중) |
+| 1.5 | `WaferDataset` + 회전/뒤집기 증강 (train만) | `pytest tests/test_dataset.py` 통과 | 1.3, 1.4 | cc:완료 |
+| 1.6 | `DinoV2Classifier` (frozen backbone + MLP head) | `pytest tests/test_model.py` 통과 | 1.1 | cc:완료 |
+| 1.7 | 학습 루프 + macro F1 & accuracy 동시 리포트 (`train.py`) | test macro F1 ≥ 0.80 **그리고** accuracy 함께 기록 — 0.80 미달이나 사용자 지시로 현재 결과(run3: macro F1 0.758 / accuracy 0.94) 채택하고 다음 단계 진행, 추가 개선은 백로그로 이관 | 1.5, 1.6 | cc:完了 (목표 미달, 백로그 이관) |
 | 1.8 | 추론 모듈 (`infer.py`) | `pytest tests/test_infer.py` 통과 | 1.6 | cc:完了 |
-| 1.9 | Streamlit 데모 (`app.py`, 랜덤 샘플 뽑기 + 확률 막대그래프) | 브라우저에서 버튼 클릭 시 이미지+예측 표시 확인 | 1.7, 1.8 | cc:TODO (blocked by 1.7, 3차 학습 끝나는 대로 착수) |
+| 1.9 | Streamlit 데모 (`app.py`, 랜덤 샘플 뽑기 + 확률 막대그래프) | 브라우저에서 버튼 클릭 시 이미지+예측 표시 확인 | 1.7, 1.8 | cc:WIP |
 
 **진행 메모**:
-- 10epoch → macro F1 0.741 / accuracy 0.93, 20epoch → macro F1 0.729 / accuracy 0.92 (에폭 늘려도 정체, 근본 원인 아님)
-- 리서치 결과: 고정 백본(frozen DINOv2) 방식은 WM-811K SOTA 문헌에서 거의 안 씀. 회전/뒤집기 증강 + bilinear 보간 적용해 3차 재학습 중 (epoch 8까지 val_f1 0.72대, epoch 완료되는 대로 test macro F1/accuracy 둘 다 기록)
-- 0.80 여전히 미달 시 다음 후보: DINOv2 일부 unfreeze 또는 처음부터 작은 CNN 학습 (ADR 0002 재검토 필요)
+- 1차(10epoch, 증강 전) → macro F1 0.741 / accuracy 0.93
+- 2차(20epoch, 증강 전) → macro F1 0.729 / accuracy 0.92 (에폭만 늘리는 건 효과 없음 확인)
+- 3차(10epoch, 회전/뒤집기 증강 + bilinear 보간) → **macro F1 0.758 / accuracy 0.94 (현재 채택 모델, `checkpoints/best_model.pt`)**. Near-full F1 0.67→0.90, Edge-Loc 0.54→0.62, Scratch 0.49→0.64로 개선. Donut은 recall 0.96까지 오른 대신 precision 0.39로 하락(과다 예측 경향)
+- 0.80 목표는 미달이나, 사용자 지시로 여기서 1단계 마무리하고 Streamlit 데모(1.9)로 진행. 추가 개선(백본 unfreeze, 처음부터 CNN 학습, 위 ShuffleNet-v2 검토)은 시간 여유 시 별도 착수
 - **향후(시간 여유 시) 별도 시도 후보**: [ShuffleNet-v2 + CNN transfer learning](https://www.hindawi.com/journals/amse/2022/1829792/) (Doss et al., 2022, *Advances in Materials Science and Engineering*) — 동일 WM-811K 데이터셋 사용, 저자 보고 수치 accuracy 96.93% / precision 95.40% / recall 96.26% / F1-score 95.75%. **미검증 주의**: 페이월로 원문 전체 확인 못함 — F1이 macro-averaged인지 weighted/micro-averaged인지 불명확(accuracy와 F1이 매우 근접한 걸 보면 weighted일 가능성 있음, 우리 데이터처럼 극심한 불균형에서 macro F1이 이렇게 높게 나오긴 어려움). 착수 전 원문 확보해서 평가 프로토콜(클래스 불균형 처리, train/test 분할 방식) 재확인 필요.
 
 ---
