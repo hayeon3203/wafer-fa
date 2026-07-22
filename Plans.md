@@ -1,0 +1,84 @@
+# wafer-fa Plans.md
+
+작성일: 2026-07-22
+
+Spec skip reason: product contract (defect taxonomy, input format, model/metric decisions) 는 grilling session에서 이미 확정되었으며, 'CONTEXT.md' (glossary)와 'docs/adr/0001-0002' (architecture decisions)에 기록되어 있습니다. solo 프로젝트를 위해 독립한 root 'spec.md '는 만들지 않고, 이 'Plans.md'을 작업 대장으로 사용하며, 정답 조건은 기존의 'CONTEXT.md/ADR'을 참조한다.
+
+team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하나씩 확정했으며, TeamAgent 다중 시점 리뷰는 필요 없다고 판단)
+---
+
+## Phase 1: DINOv2 + 簡易分類器（Stage 1）
+
+目的: 웨이퍼 맵(다이 격자) 보고 9종 불량 유형(또는 정상) 분류. Streamlit으로 즉시 결과 확인.
+
+| Task | 내용 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 1.1 | 프로젝트 스캐폴딩 (venv, requirements, labels.py) | `pytest` 실행 가능, git repo 초기 커밋 존재 | - | cc:완了 |
+| 1.2 | WM-811K 데이터 확보 (LSWMD.pkl) | `data/raw/LSWMD.pkl` 로드 가능, 811,457행 확인 | - | cc:完了 |
+| 1.3 | 매트릭스→이미지 렌더러 (`render.py`) | `pytest tests/test_render.py` 통과 | 1.1 | cc:完了 |
+| 1.4 | 데이터 전처리 (`data_prep.py`, 라벨 있는 172,950건만, stratified 80/10/10) | `data/processed/manifest.csv` 생성, 각 split에 9클래스 전부 존재 | 1.1, 1.2 | cc:完了 |
+| 1.5 | `WaferDataset` + 회전/뒤집기 증강 (train만) | `pytest tests/test_dataset.py` 통과 | 1.3, 1.4 | cc:完了 |
+| 1.6 | `DinoV2Classifier` (frozen backbone + MLP head) | `pytest tests/test_model.py` 통과 | 1.1 | cc:完了 |
+| 1.7 | 학습 루프 + macro F1 리포트 (`train.py`) — **목표 macro F1 ≥ 0.80 미달, 튜닝 중** | test macro F1 ≥ 0.80 (현재 최고 0.741, 10epoch 기준) | 1.5, 1.6 | cc:WIP |
+| 1.8 | 추론 모듈 (`infer.py`) | `pytest tests/test_infer.py` 통과 | 1.6 | cc:完了 |
+| 1.9 | Streamlit 데모 (`app.py`, 랜덤 샘플 뽑기 + 확률 막대그래프) | 브라우저에서 버튼 클릭 시 이미지+예측 표시 확인 | 1.7, 1.8 | cc:TODO (blocked by 1.7) |
+
+**진행 메모**:
+- 10epoch → macro F1 0.741, 20epoch → 0.729 (에폭 늘려도 정체, 근본 원인 아님)
+- 리서치 결과: 고정 백본(frozen DINOv2) 방식은 WM-811K SOTA 문헌에서 거의 안 씀. 회전/뒤집기 증강 + bilinear 보간 적용 후 재학습 중 (현재 백그라운드 실행, epoch 4까지 val_f1 0.72대)
+- 0.80 여전히 미달 시 다음 후보: DINOv2 일부 unfreeze 또는 처음부터 작은 CNN 학습 (ADR 0002 재검토 필요)
+
+---
+
+## Phase 2: LangGraph 4-agent relay (Stage 2)
+
+목적: SemiFA 구조 참고, "설명 → 원인분석 → 심각도 → 해결책" 릴레이.
+
+| Task | 내용 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 2.1 | Stage 1 분류 결과(라벨+9클래스 확률)를 받는 DefectDescriber 에이전트 | 분류 결과 입력 시 자연어 설명 1개 이상 생성 | Phase 1 | cc:TODO |
+| 2.2 | RootCauseAnalyzer 에이전트 (원인 가설) | 결함 유형별 원인 후보 1개 이상 출력 | 2.1 | cc:TODO |
+| 2.3 | SeverityClassifier 에이전트 (CRITICAL/MAJOR/MINOR/NONE) | 4단계 중 1개 판정 출력 | 2.2 | cc:TODO |
+| 2.4 | RecipeAdvisor 에이전트 (해결책 제안) | 조치 제안 1개 이상 출력 | 2.3 | cc:TODO |
+| 2.5 | LangGraph 릴레이 오케스트레이션 + Streamlit UI 확장 (에이전트별 결과 섹션) | 4개 에이전트 순차 실행 결과가 화면에 순서대로 표시 | 2.1-2.4 | cc:TODO |
+
+**미확정 사항** (착수 전 별도 grilling 필요): RootCauseAnalyzer가 실제/모의 텔레메트리 필요한지 여부(Stage 3 선행 여부), 서술용 LLM 선택, 케이스 검색(Qdrant 등) 필요 여부.
+
+---
+
+## Phase 2.5: 고객 데모용 대시보드 (선택, Optional)
+
+목적: 영업/PoC 미팅용 폴리시드 UI. 필요 시에만 착수.
+
+**도구: ThingsBoard** (TailAdmin에서 전환, [ADR 0003](docs/adr/0003-thingsboard-over-tailadmin-dashboard.md) 참고). IoT 텔레메트리+위젯 대시보드가 본업이라 참고 스크린샷(Lot 선택, 패턴별 결함 히트맵, Lot Trend, 임계값 슬라이더)과 자연스럽게 맞고, Phase 3(장비 로그)까지 같은 플랫폼으로 이어짐.
+
+| Task | 내용 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 2.5.1 | ThingsBoard 인스턴스 세팅 (self-hosted) | ThingsBoard 관리 콘솔 접속 가능 | - | cc:TODO |
+| 2.5.2 | Stage 1/2 파이프라인용 REST/텔레메트리 연동 (분류 결과를 ThingsBoard로 전송) | ThingsBoard 대시보드에 분류 결과 데이터 수신 확인 | Phase 1, Phase 2, 2.5.1 | cc:TODO |
+| 2.5.3 | 위젯 구성: Lot 선택 패널 / 패턴별 웨이퍼 수 테이블 / composite 웨이퍼맵 히트맵 / Lot Trend 차트 / 모델 임계값 슬라이더 | 참고 스크린샷과 동등한 5종 위젯이 대시보드에 표시 | 2.5.2 | cc:TODO |
+
+**주의**: 착수 전 사용자가 "필요하다" 확정한 뒤에만 진행 (Optional, 현재 backlog).
+**UI 스타일 주의**: 제네릭 AI 룩 지양 — 사용자 확인된 피드백 ([[feedback-ui-style]] 메모리 참고).
+
+---
+
+## Phase 3: 장비 로그(가상 데이터) 상관관계 (선택, Optional)
+
+목적: 사진만 보는 것보다 똑똑하게 — digital twin 시나리오의 장비 텔레메트리 연동.
+
+| Task | 내용 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 3.1 | 합성 장비 로그 생성기 (SECS/GEM 형태, 결함 클래스와 상관되게) | 결함 클래스별로 구분되는 합성 로그 데이터셋 생성 | Phase 1 | cc:TODO |
+| 3.2 | ThingsBoard 텔레메트리 수집기로 합성 장비 로그 전송 + 상관관계 위젯 추가 | ThingsBoard 대시보드에 결함-로그 상관 시각화 1개 이상 표시 | 3.1, Phase 2.5 | cc:TODO |
+
+**미확정 사항**: 합성 텔레메트리 생성 모델(규칙 기반 vs 실제 팹 분포 샘플링), 데모 목적상 필요한 "그럴듯함"의 수준.
+
+---
+
+## 참고 문서
+
+- `CONTEXT.md` — 도메인 용어집 (Wafer Map, Die, Defect Class, Digital Twin Feed)
+- `docs/adr/0001-matrix-input-no-image-upload.md`
+- `docs/adr/0002-frozen-dinov2-base-mlp-head.md`
+- `docs/adr/0003-thingsboard-over-tailadmin-dashboard.md`
