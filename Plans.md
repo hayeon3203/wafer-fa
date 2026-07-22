@@ -38,13 +38,15 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 | Task | 내용 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 2.1 | Stage 1 분류 결과(라벨+9클래스 확률)를 받는 DefectDescriber 에이전트 | 분류 결과 입력 시 자연어 설명 1개 이상 생성 | Phase 1 | cc:TODO |
-| 2.2 | RootCauseAnalyzer 에이전트 (원인 가설) | 결함 유형별 원인 후보 1개 이상 출력 | 2.1 | cc:TODO |
-| 2.3 | SeverityClassifier 에이전트 (CRITICAL/MAJOR/MINOR/NONE) | 4단계 중 1개 판정 출력 | 2.2 | cc:TODO |
-| 2.4 | RecipeAdvisor 에이전트 (해결책 제안) | 조치 제안 1개 이상 출력 | 2.3 | cc:TODO |
-| 2.5 | LangGraph 릴레이 오케스트레이션 + Streamlit UI 확장 (에이전트별 결과 섹션) | 4개 에이전트 순차 실행 결과가 화면에 순서대로 표시 | 2.1-2.4 | cc:TODO |
+| 2.1 | Stage 1 분류 결과(라벨+9클래스 확률)를 받는 DefectDescriber 에이전트 | 분류 결과 입력 시 자연어 설명 1개 이상 생성 | Phase 1 | cc:완료 |
+| 2.2 | RootCauseAnalyzer 에이전트 (원인 가설) | 결함 유형별 원인 후보 1개 이상 출력 | 2.1 | cc:완료 |
+| 2.3 | SeverityClassifier 에이전트 (CRITICAL/MAJOR/MINOR/NONE) | 4단계 중 1개 판정 출력 | 2.2 | cc:완료 |
+| 2.4 | RecipeAdvisor 에이전트 (해결책 제안) | 조치 제안 1개 이상 출력 | 2.3 | cc:완료 |
+| 2.5 | LangGraph 릴레이 오케스트레이션 + Streamlit UI 확장 (에이전트별 결과 섹션) | 4개 에이전트 순차 실행 결과가 화면에 순서대로 표시 | 2.1-2.4 | cc:완료 |
 
-**미확정 사항** (착수 전 별도 grilling 필요): RootCauseAnalyzer가 실제/모의 텔레메트리 필요한지 여부(Stage 3 선행 여부), 서술용 LLM 선택, 케이스 검색(Qdrant 등) 필요 여부.
+**진행 메모 (2.1-2.5)**: `src/wafer_fa/relay.py`(LangGraph 4-노드 릴레이, LLaVA 직접 호출, exaone3.5:7.8b 번역) + `src/wafer_fa/cases.py`(Qdrant `wafer_defect_cases` 빈 컬렉션 + 검색) 구현, `app.py`에 배선. `pytest tests/test_relay.py tests/test_cases.py` 통과(그래프 상태 전달·심각도 파싱은 mock, Qdrant 검색은 실제 서비스 대상 통합 테스트). `llava-hf/llava-1.5-7b-hf` 최초 다운로드(14GB, `~/.cache/huggingface/hub`에 캐시, 이후 재다운로드 없음) + 실제 구동 + Streamlit 브라우저(`172.16.4.228:8501`)에서 4개 에이전트 결과 표시 사용자 확인 완료. 트러블슈팅: `device_map="auto"`에 `accelerate` 누락 → 설치, PYTHONPATH=src 누락으로 재시작 시 `wafer_fa` 모듈 못 찾던 문제 → `PYTHONPATH=src streamlit run app.py`로 재기동.
+
+**확정 사항** (grilling 완료, [ADR 0004](docs/adr/0004-llava-relay-no-langchain.md) 참고): 텔레메트리 불필요(결함 클래스+도메인 지식만, Phase 3 선행 불필요) / LLaVA(HF transformers 직접 로드, LangChain 없음) 4에이전트 통일, DefectDescriber만 이미지 입력 / 영어 추론 후 exaone3.5:7.8b(Ollama)로 한국어 번역 / Qdrant `wafer_defect_cases` 컬렉션(nomic-embed-text)은 지금 만들고 검색 로직도 구현, 케이스 데이터는 비워둔 채 백로그로 이관.
 
 ---
 
@@ -75,6 +77,8 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 | 3.2 | ThingsBoard 텔레메트리 수집기로 합성 장비 로그 전송 + 상관관계 위젯 추가 | ThingsBoard 대시보드에 결함-로그 상관 시각화 1개 이상 표시 | 3.1, Phase 2.5 | cc:TODO |
 
 **미확정 사항**: 합성 텔레메트리 생성 모델(규칙 기반 vs 실제 팹 분포 샘플링), 데모 목적상 필요한 "그럴듯함"의 수준.
+
+**선반영**: SemiFA 참고해 TimescaleDB 컨테이너(`docker-compose.yml`, `wafer-fa-timescaledb`, localhost:5433, DB/user `wafer_fa`)와 빈 hypertable `equipment_telemetry`(time/wafer_id/defect_class/equipment_id/param/value)를 3.1 착수 전에 미리 만들어둠. 데이터 없음, 3.1의 합성 로그 생성기가 나중에 채움.
 
 ---
 

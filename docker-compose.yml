@@ -1,0 +1,17 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: wafer-fa-timescaledb
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=wafer_fa
+      - POSTGRES_USER=wafer_fa
+      - POSTGRES_PASSWORD=${WAFER_FA_DB_PASSWORD:-wafer_fa}
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  timescale_data:
