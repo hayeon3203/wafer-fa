@@ -58,12 +58,14 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 | Task | 내용 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 2.5.1 | ThingsBoard 인스턴스 세팅 (self-hosted) | ThingsBoard 관리 콘솔 접속 가능 | - | cc:TODO |
+| 2.5.1 | ThingsBoard 인스턴스 세팅 (self-hosted) | ThingsBoard 관리 콘솔 접속 가능 | - | cc:완료 |
 | 2.5.2 | Stage 1/2 파이프라인용 REST/텔레메트리 연동 (분류 결과를 ThingsBoard로 전송) | ThingsBoard 대시보드에 분류 결과 데이터 수신 확인 | Phase 1, Phase 2, 2.5.1 | cc:TODO |
 | 2.5.3 | 위젯 구성: Lot 선택 패널 / 패턴별 웨이퍼 수 테이블 / composite 웨이퍼맵 히트맵 / Lot Trend 차트 / 모델 임계값 슬라이더 | 참고 스크린샷과 동등한 5종 위젯이 대시보드에 표시 | 2.5.2 | cc:TODO |
 
-**주의**: 착수 전 사용자가 "필요하다" 확정한 뒤에만 진행 (Optional, 현재 backlog).
+**주의**: 착수 전 사용자가 "필요하다" 확정한 뒤에만 진행 (Optional, 현재 backlog) — 2026-07-22 사용자가 Phase 2.5 착수 직접 지시, 확정됨.
 **UI 스타일 주의**: 제네릭 AI 룩 지양 — 사용자 확인된 피드백 ([[feedback-ui-style]] 메모리 참고).
+
+**진행 메모 (2.5.1)**: `docker-compose.yml`에 `thingsboard-postgres`(postgres:16-alpine, 내부 전용) + `thingsboard`(thingsboard/tb-node:4.3.1.3) 서비스 추가. 호스트 포트 충돌 회피 위해 웹 UI는 8080 대신 **8082**로 매핑(1883/7070/8883/5683-5688은 기본값 유지, 전부 미사용 포트 확인 후 배정). `docker compose run --rm -e INSTALL_TB=true -e LOAD_DEMO=false thingsboard`로 스키마+시스템 데이터 설치(데모 데이터는 제외, 실제 웨이퍼 데이터로 채울 예정이라 불필요) 후 `docker compose up -d thingsboard`로 기동. 검증: `GET /login` → 200, `POST /api/auth/login`(sysadmin 기본 계정)으로 JWT 토큰 발급 확인. 콘솔: `http://<host>:8082` (기본 계정 sysadmin@thingsboard.org / sysadmin — 데모 종료 후 교체 권장).
 
 ---
 
