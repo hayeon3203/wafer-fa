@@ -40,7 +40,7 @@ def run_pipeline(row: pd.Series, checkpoint_path: str = CHECKPOINT_PATH) -> dict
     try:
         send_pipeline_stage(current_stage)
         matrix = np.load(f"{PROCESSED_DIR}/{row['path']}")
-        image = render_wafer_map(matrix)
+        image = render_wafer_map(matrix, size=512)
         probs = classify_matrix(matrix, checkpoint_path)
         predicted = max(probs, key=probs.get)
         confidence = probs[predicted]
