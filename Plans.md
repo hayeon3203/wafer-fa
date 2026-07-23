@@ -120,12 +120,57 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 | Task | 내용 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 3.1 | 합성 장비 로그 생성기 (SECS/GEM 형태, 결함 클래스와 상관되게) | 결함 클래스별로 구분되는 합성 로그 데이터셋 생성 | Phase 1 | cc:TODO |
-| 3.2 | ThingsBoard 텔레메트리 수집기로 합성 장비 로그 전송 + 상관관계 위젯 추가 | ThingsBoard 대시보드에 결함-로그 상관 시각화 1개 이상 표시 | 3.1, Phase 2.5 | cc:TODO |
+| 3.1 | 합성 장비 로그 생성기 (SECS/GEM 형태, 결함 클래스와 상관되게) | 결함 클래스별로 구분되는 합성 로그 데이터셋 생성 | Phase 1 | cc:완료 (재설계, 아래 "3.1 재설계" 참고) |
+| 3.2 | ThingsBoard 텔레메트리 수집기로 합성 장비 로그 전송 + 상관관계 위젯 추가 | ThingsBoard 대시보드에 결함-로그 상관 시각화 1개 이상 표시 | 3.1, Phase 2.5 | cc:완료 (라이브 TB 반영 완료, 브라우저 시각 확인은 사용자 몫 — 아래 "진행 메모" 참고) |
 
-**미확정 사항**: 합성 텔레메트리 생성 모델(규칙 기반 vs 실제 팹 분포 샘플링), 데모 목적상 필요한 "그럴듯함"의 수준.
+**확정 사항 (3.1 스펙)**: 데이터 소스는 Kaggle UCI SECOM(`paresh2047/uci-semcom`, 1567x590 anonymized feature + pass/fail). SECOM은 절대 엔티티로 편입 안 함 — **spine은 WM-811K/manifest 쪽 실제 `wafer_id`**(Phase1부터 이미 이미지/telemetry/ThingsBoard가 전부 이 wafer_id로 join됨). SECOM은 클러스터 통계치(평균/표준편차/공분산)만 1회 추출해 재사용하는 샘플링 소스일 뿐, 실제 로그 row는 manifest의 진짜 wafer_id마다 생성. (반대로 SECOM row에 9class를 붙이는 방식은 기각 — 기존 파이프라인과 wafer_id로 join 안 되는 고아 데이터셋이 됨.)
+- 전처리: feature별 결측률 50% 초과면 drop, 나머지만 후보 pool.
+- 클러스터링: 후보 feature 상관행렬 기반 hierarchical clustering, **K=9 (WM-811K 9class와 1:1 매핑, 클래스 수를 따름)**. 클러스터ID를 `equipment_id`로 사용(숫자만, 예 `EQP_1`~`EQP_9`, 의미 이름 안 붙임). `param`은 원본 `feature_N` 그대로(익명 유지, 리네이밍 안 함 — 값 범위/분포로 물리량(온도/압력/가스유량 등) 추정해 라벨 붙이는 것도 기각. SECOM은 confidentiality 때문에 의도적으로 이름 제거된 데이터셋이라 range matching은 근거 없는 추측이고, 지금까지의 "논문 인용 기반" 원칙과도 안 맞음. 행사 시연시 "실제 팹은 공정 파라미터 대외비라 익명 처리" 스토리로 대응).
+- 결함클래스 → root cause 매핑(문헌 근거, Wu/Jang/Chen 2015 IEEE TSM 원 논문 기준 + 보조 자료):
+  - Center: 필름 증착(film deposition) 이상
+  - Edge-Ring: 에칭 문제 또는 불균일 온도 분포
+  - Scratch: 제조 공정 중 물리적 스크래치(기계 핸들링)
+  - Random: 먼지/화학 잔류물 — **공정-비체계적, 상관관계 약하게/없게 생성**(baseline과 유사)
+  - Donut: 포토레지스트 clean 공정 residue 미제거
+  - Edge-Loc: 비정상 열처리(annealing) 또는 load-lock valve 오염
+  - Loc: 불균일 clean 또는 wafer-chuck 계면 particle 오염(웨이퍼 뒷면-척 사이 입자가 국소 높이 왜곡 유발) — Random(클린룸 부유 먼지, 장비 비특이적)과 달리 특정 장비 chuck 이슈로 특정 가능
+  - Near-full: 여러 요인 동시 발생한 치명적 공정 이탈 — 다중 클러스터 동시 큰 폭 shift
+  - none: baseline, shift 없음
+  - 근거: [Wafer Map Failure Pattern Recognition and Similarity Ranking (Wu, Jang, Chen, IEEE TSM 2015)](https://www.semanticscholar.org/paper/Wafer-Map-Failure-Pattern-Recognition-and-Ranking-Wu-Jang/a581566276f3b2242ec6544c185204a96f17db8a), [WM-811K wafer patterns 그림 설명](https://www.researchgate.net/figure/Used-wafer-patterns-of-WM-811K-for-this-study-Near-full-and-none-patterns-are-excluded_fig3_370900183), [across-wafer uniformity control in plasma etch](https://sst.semiconductor-digest.com/2016/08/evolution-of-across-wafer-uniformity-control-in-plasma-etch/), [Design of particle mitigating wafer chucks for yield enhancement](https://repositories.lib.utexas.edu/items/a8e4ba86-c5d6-4981-b554-0ec057c91d63)
+- shift 강도: ±2 std (baseline mean 대비 매핑된 클러스터 feature들에 적용).
+- 샘플링 방식: 순수 row bootstrap 기각 (SECOM 1567행 << manifest 172,950 wafer_id라 중복 심함). 클러스터별(9개, 각 5~10 feature) 실제 SECOM 행에서 **mean vector + 공분산행렬** 추정 후 `numpy.random.multivariate_normal(mean, cov, size=N)`으로 매 wafer_id마다 새로 샘플링. feature간 실제 상관구조는 보존하면서(단순 독립 정규분포와 차이점) 무한히 서로 다른 값 생성(bootstrap의 중복 문제 회피). shift는 이 mean vector에 ±2std 더한 뒤 같은 공분산으로 샘플링.
+- 규모: manifest 전체 172,950 wafer 다 사용(3000 cap 없음). `build_dashboard_data.py`(composite 히트맵용, 클래스당 3000 샘플)는 이미 배포/검증 끝난 별개 코드라 그대로 둠 — 이번 3.1만 전체 스케일로 감. TimescaleDB hypertable은 원래 이 규모 위한 물건이라 무리 없음.
+- `wafer_id` 구성: manifest엔 `wafer_id` 컬럼 자체가 없음(`split,path,label,lot_id,wafer_index`) — `f"{lot_id}_{wafer_index}"`로 합성. 기존 `telemetry.py`/Wafer Detail 대시보드가 이미 lot_id+wafer_index 기준으로 조회하는 관례라 그대로 따라감.
+- 클러스터↔결함클래스 배정: SECOM 클러스터는 feature 상관관계로만 묶인 통계적 그룹이라(feature 익명이라 실제 물리적 의미 검증 불가) 클래스 배정 자체가 근본적으로 임의(arbitrary) — **클러스터를 분산(variance) 내림차순 정렬 후 `labels.py`의 `CLASSES` 순서대로 1:1 매칭**. 재현 가능(고정 규칙)하기만 하면 되고 억지 인과관계 안 만듦.
+- `time` 컬럼: manifest에 wafer별 실제 타임스탬프 없음 — **적재 시점 기준 최근 30일 사이에 균등 분산**(lot_id/wafer_index 순서를 시간순 proxy로 매핑). 근거 타임스탬프가 없어 실제 처리순서 재현은 불가능하고, ThingsBoard 기본 시간범위 위젯에 걸리게만 하면 됨(행사 데모 시점 기준 "최근 데이터"로 보이는 게 목적). 배치는 오프라인 1회 생성이라 재생성 시 재현성 이슈 없음(seed 논의는 불필요 — 한 번 만들고 끝).
+- 실행 방식: 기존 `build_dashboard_data.py`와 같은 오프라인 배치 패턴(1회 실행 후 TimescaleDB에 적재, 위젯은 읽기만). 기존 코드베이스에 TimescaleDB 연결/적재 코드가 아직 없음(`db/init.sql`만 존재) — 3.1에서 새로 작성 필요.
+
+**설계 확정 완료**: 남은 건 구현(코드 작성)뿐.
+
+**진행 메모 (3.1)**: `src/daol_fascope/equipment_log.py`(클러스터링+매핑+샘플링 핵심 로직) + `src/daol_fascope/build_equipment_log.py`(오프라인 배치, `build_dashboard_data.py`와 같은 패턴) 구현, `pytest tests/test_equipment_log.py tests/test_build_equipment_log.py` 16개 통과(합성 데이터로 클러스터링/매핑/shift 로직 검증, 실제 SECOM·DB 의존 없음). 실제 SECOM 데이터는 Kaggle API 인증 미설정 상태라 **동일 데이터셋의 UCI 원본 미러**(`archive.ics.uci.edu/static/public/179/secom.zip`, 파일 바이트 동일)에서 받아 `data/raw/secom/`에 저장(`data/`는 gitignore 대상). 클러스터링 구현 중 실제 SECOM 상관행렬 특성 발견: `scipy.cluster.hierarchy.fcluster(..., criterion="maxclust")`가 최댓값(1.0) 거리에서 116개 병합이 동타이로 몰려있어 9클러스터 요청에 1클러스터로 붕괴하는 문제 확인 — `cut_tree(Z, n_clusters=9)`(병합 순서 기준 절단, 높이 임계값 아님)로 교체해 해결. 실제 결과: 9클러스터 중 2개(Center→10 feature, Donut→10 feature)만 유의미한 크기, 나머지 7개는 전부 1-feature 싱글턴 — SECOM 익명 신호 590개 중 실제로 서로 상관된 건 소수뿐이라는 데이터셋 자체의 알려진 특성(노이즈 심함)이지 버그 아님, 프로젝트의 "근거 없는 추측 안 함" 원칙과도 부합해 그대로 반영. Near-full의 "다중 클러스터 동시 shift" 스펙은 구체적 클러스터 선택 기준이 없어 임의 결정: **Random/none을 제외한 나머지 7개 클래스 소유 클러스터 전부 동시 shift**(여러 요인 동시 발생이라는 의도에 맞고 결정적·재현 가능). 실제 배치 실행 완료: `PYTHONPATH=src python -m daol_fascope.build_equipment_log`로 172,950 wafer 전체 처리, TimescaleDB `equipment_telemetry`에 4,669,650행 적재(9class × 9equipment 조합, `psycopg` COPY, 클래스별 그룹 단위 벡터화 샘플링이라 전체 실행 수 초 내 완료). 검증: `EQP_1`(Center 소유) 그룹별 평균 조회 시 Center 5082 / Near-full 5200 vs 나머지 클래스(Donut~none) 461~511로 명확히 분리 확인, `time` 컬럼 최근 30일 범위 확인. **TODO(3.2 선행 필요)**: 위 결과는 DB 적재까지만 — ThingsBoard 상관관계 위젯은 3.2 범위.
 
 **선반영**: SemiFA 참고해 TimescaleDB 컨테이너(`docker-compose.yml`, `daol-fascope-timescaledb`, localhost:5433, DB/user `wafer_fa`)와 빈 hypertable `equipment_telemetry`(time/wafer_id/defect_class/equipment_id/param/value)를 3.1 착수 전에 미리 만들어둠. 데이터 없음, 3.1의 합성 로그 생성기가 나중에 채움.
+
+**3.1 재설계 (grilling 완료, 2026-07-23)**: 3.2 설계 중 "장비(equipment) 클러스터링"이 부자연스럽다는 문제제기로 3.1을 재검토, 클러스터링 접근을 폐기함.
+- **재검토 계기**: 실제 SECOM 상관행렬로 `ward` linkage/silhouette score까지 다 테스트해봤지만 silhouette이 k=3→30 구간에서 단조증가(뚜렷한 elbow 없음) — 이 데이터엔 "자연스러운 장비 개수"라는 게 애초에 없음이 확인됨. 그러면 K=9든 클러스터링 방식이든 결국 어차피 임의적인 선택이라, 차라리 더 단순하고 정직한 방식으로 가기로 함.
+- **장비(equipment) 레이어 자체를 폐기**: SECOM 공식 문서(`secom.names`)상 각 feature는 "sensors and/or process measurement points" — 센서 하나 단위지 장비 하나가 아님(장비 하나=센서 여러개가 맞는 모델이긴 하나, 몇 개 장비로 나눌지에 대한 데이터 근거가 없어 그 매핑 자체를 걷어냄). 대신 **센서(feature_N) 562개를 1차 시민으로** 다룸.
+- **클러스터링 → 랜덤 배정**: 결측률 50% 초과 제거 후 남은 562개 후보 feature를 `cut_tree`/`ward` 등 클러스터링 없이 **랜덤으로 9그룹(클래스당 ~62개, seed=42 고정 재현가능)에 배정**. 이미 "클래스 배정 자체가 근본적으로 임의"라고 기존에도 인정했던 것과 같은 맥락 — 클러스터링이 주는 "그럴듯함"이 사실은 허상이라 걷어냄.
+- **`equipment_id` 컬럼**: 스키마(long format, `db/init.sql`)는 안 바꿈. 값은 `param`과 동일하게 채움(장비 그룹 개념이 없어졌으니 사실상 중복 컬럼이지만, 스키마 마이그레이션 안 하기로 함).
+- **장비명 네이밍(EQP_1=증착챔버 등) 전부 폐기**: 장비 레이어가 없어졌으니 붙일 대상이 없음 — `feature_N` 그대로 노출.
+- **"상관관계 배정의 임의성"과 "상관관계 자체의 강도"는 별개임을 확인**: 어느 센서가 어느 클래스 그룹에 속하는지는(랜덤이든 클러스터링이든) 필연적으로 임의적이지만(SECOM이 confidentiality로 익명화된 데이터라 물리적 의미 검증 불가), 클래스↔그룹 상관관계 자체는 `mean + 2*std` shift로 코드가 매 wafer마다 강제로 만드는 신호라 배정 방식과 무관하게 항상 강하게 나옴(실측: EQP_1 그룹 평균이 Center는 5082, 나머지 클래스는 461~511).
+- shift 로직(own 그룹 소유 클래스만 +2σ, Random/none은 baseline, Near-full은 Random/none 제외 나머지 7개 그룹 전부 동시 co-shift)은 변경 없음.
+- **재구현 필요**: `equipment_log.py`의 `cluster_features`/`assign_clusters_to_classes`/`select_representative_features` 삭제 → `assign_features_randomly`로 교체. 행 수는 172,950 wafer × 562 feature ≈ 9700만행(캡 없음, 기존 460만행보다 20배) — 데이터 손실 없이 다 씀. 기존 `equipment_telemetry` 467만행(구 클러스터링 모델 결과물)은 TRUNCATE 후 재적재.
+
+**3.2 확정 사항 (grilling 완료, 2026-07-23)**: 원래 계획은 상관관계 위젯을 Detail에 넣는 거였으나, grilling 중 Overview(라이브 제목 기준 — Lot/Composite/갤러리형 대시보드)로 옮기고 Detail(그리드형, placeholder 2칸 남은 쪽)엔 다른 걸 채우는 걸로 재구성.
+- **데이터 접근**: TimescaleDB `equipment_telemetry`를 ThingsBoard가 직접 못 읽으므로(TB CE엔 PostgreSQL datasource 없음), 새 경량 REST 서버 신설(`:8093`, `wafer_browser_server.py`류 패턴 — GPU 붙은 `wafer_predict_server`:8092와는 분리, 관심사 안 섞음).
+- **Overview에 추가할 위젯 (신규 커스텀 위젯 1개)**: 드래그앤드롭 산점도. 562개 센서 검색 가능한 팔레트에서 2개를 골라 X/Y 드롭존에 드래그하면, 그 두 센서의 실제 값 산점도를 결함클래스별 색 구분으로 렌더(클래스당 최대 200개 샘플링, 172,950 전체는 렌더 비용상 과함). "센서 N개+클래스 M개 드래그 → 미니 히트맵" 형태는 백로그로 이관(3.2 범위 아님).
+- **Detail "설비/공정 텔레메트리" placeholder 교체**: 현재 표시 중인 웨이퍼(Yield Map 위젯이 읽는 것과 같은 device latest telemetry의 lot_id/wafer_index)의 소유 클래스 그룹(~62개 센서) 전부를 스크롤 테이블로 표시(컬럼: param/value/baseline평균/편차).
+- **Detail "공정 위험 지표" placeholder 교체**: 같은 편차 계산 재사용, "|z-score|>2인 센서 N개" 요약 경고 카드(SHIFT_STD=2.0과 동일 기준 재사용, 새 임계값 발명 안 함).
+- **Overview 위젯**: 특정 lot/wafer 선택 없이 전체 데이터 기준 글로벌 뷰(기존 "결함 검출 개요"류 위젯과 같은 성격).
+
+**진행 메모 (3.1 재설계 구현, 2026-07-23)**: `equipment_log.py`의 `cluster_features`/`assign_clusters_to_classes`/`select_representative_features` 삭제, `assign_features_randomly`(seed=42 고정, `np.array_split`로 9그룹 균등 분배)로 교체. `build_equipment_log.py`도 맞춰 수정(`equipment_id` 컬럼 값을 `param`과 동일하게 채움). 대량 삽입 성능 때문에 `insert_chunk`를 `write_row` 루프에서 `to_csv` 기반 벌크 TSV COPY로 교체(9700만행 규모에서 row-by-row는 너무 느림). `pytest tests/test_equipment_log.py tests/test_build_equipment_log.py` 16개 통과. 기존 `equipment_telemetry` 467만행 TRUNCATE 후 재적재: 172,950 wafer × 562 sensor = **97,197,900행** 적재 완료(클래스별 그룹 크기: Center/Donut/Edge-Loc/Edge-Ring 63개, 나머지 5개 62개). 검증: `feature_221`류 편차 확인, Center 소유 그룹이 Center/Near-full 웨이퍼에서만 체계적으로 shift되고 다른 클래스에서는 baseline인 것 재확인.
+
+**진행 메모 (3.2 구현, 2026-07-23)**: `src/daol_fascope/equipment_log_server.py`(:8093, `wafer_browser_server.py`류 stdlib-only 패턴) 신설 — `/api/sensors`(562개 목록), `/api/scatter?x=&y=`(두 센서 값 wafer_id 기준 join, 클래스당 최대 200개 샘플링), `/api/wafer-sensors?lot_id=&wafer_index=`(그 웨이퍼 소유 클래스 그룹 전체 + baseline 대비 편차, `deviation_std` 내림차순 정렬) 3개 엔드포인트. `db/init.sql`에 `idx_equipment_telemetry_param (param, wafer_id)` 인덱스 추가 + 라이브 DB에도 직접 생성(`/api/scatter`의 self-join이 이 인덱스 없으면 9700만행 풀스캔). `setup_thingsboard_dashboard.py`에 커스텀 위젯 3개 추가: `CORRELATION_SCATTER_*`(드래그앤드롭 산점도, SVG 직접 렌더, 라이브러리 없음), `SENSOR_TABLE_*`/`RISK_ALERT_*`(둘 다 lot_id/wafer_index telemetry 구독 → `/api/wafer-sensors` 각자 fetch). 적용 함수 `apply_correlation_scatter_widget()`(Wafer Overview에 새 row로 추가, row=17 col=0 24x12 — 기존 위젯 안 건드림)와 `apply_detail_sensor_widgets()`(Wafer Detail의 남은 placeholder 2개 교체) 작성, `apply_pipeline_progress_widget()`와 같은 update-in-place 패턴. `pytest tests/test_equipment_log_server.py` 3개 통과. 로컬 스모크 테스트(:8093 기동, 실제 DB 대상): `/api/sensors` 562개 확인, `/api/wafer-sensors`(lot15369_18) 62개 센서+편차 확인, `/api/scatter`(feature_0/feature_1, 클래스당50) 450개 포인트 클래스당 정확히 분배 확인, 응답속도 1초 내(인덱스 적용 후). **라이브 반영 완료 (2026-07-23)**: 사용자가 세션에 `THINGSBOARD_ADMIN_PASSWORD` 제공, `--apply-correlation-scatter`(Wafer Overview dashboard id `b4a550a0-85af-11f1-b7a9-c1826206c77f`, fqn `tenant.daol_fascope_correlation_scatter`)와 `--apply-detail-sensor-widgets`(Wafer Detail dashboard id `b4a41820-85af-11f1-b7a9-c1826206c77f`, fqn `tenant.daol_fascope_sensor_table`/`tenant.daol_fascope_risk_alert`) 둘 다 실행 완료. GET으로 두 대시보드 재조회해 위젯 배치 확인: Overview는 기존 5개 위젯(Lot Analysis/Composite갤러리/Wafer갤러리/슬라이더/원인분석요약) 그대로 두고 상관관계 산점도가 row17에 새로 추가됨, Detail은 placeholder였던 "설비/공정 텔레메트리"/"공정 위험 지표" 자리가 정확히 센서테이블/위험알림으로 교체되고 나머지(Yield Map/Class Overview/Process Risk&Alerts/파이프라인 진행바)는 안 건드려진 것 확인. **남은 건 브라우저 시각 확인뿐**(claude-in-chrome 미연결이라 실제 드래그앤드롭 동작·렌더링은 사용자가 `http://172.16.4.228:8082`에서 직접 확인 필요 — `equipment_log_server.py`(:8093)가 떠 있어야 위젯이 데이터를 받아옴, 현재 로컬에서 백그라운드로 기동 중).
 
 ---
 

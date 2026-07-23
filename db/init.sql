@@ -15,3 +15,6 @@ SELECT create_hypertable('equipment_telemetry', 'time', if_not_exists => TRUE);
 
 CREATE INDEX IF NOT EXISTS idx_equipment_telemetry_wafer ON equipment_telemetry (wafer_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_equipment_telemetry_defect ON equipment_telemetry (defect_class, time DESC);
+-- Plans.md 3.2: equipment_log_server.py's /api/scatter self-joins on wafer_id
+-- filtered by param -- without this, that's a full scan of ~9700만 rows per sensor.
+CREATE INDEX IF NOT EXISTS idx_equipment_telemetry_param ON equipment_telemetry (param, wafer_id);

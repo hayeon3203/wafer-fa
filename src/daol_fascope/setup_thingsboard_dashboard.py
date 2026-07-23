@@ -500,6 +500,280 @@ self.onDestroy = function() {};
 """
 
 
+# ---------------------------------------------------------------------------
+# Custom widget: Correlation Scatter (Plans.md 3.2). Drag 2 of the 562 sensors
+# from a searchable palette onto the X/Y drop zones -> real scatter plot from
+# equipment_log_server.py (:8093), colored by defect_class. No selection state
+# needed from other widgets -- global view, matches "결함 검출 개요" on the
+# same dashboard.
+# ---------------------------------------------------------------------------
+CORRELATION_SCATTER_HTML = """
+<div class="sc-wrap">
+  <div class="sc-side">
+    <input type="text" class="sc-search" placeholder="센서 검색 (예: feature_162)" />
+    <div class="sc-list"></div>
+  </div>
+  <div class="sc-main">
+    <div class="sc-drops">
+      <div class="sc-drop" data-axis="x">X축 센서를 여기로 드래그</div>
+      <div class="sc-drop" data-axis="y">Y축 센서를 여기로 드래그</div>
+    </div>
+    <div class="sc-status">센서 2개를 왼쪽 목록에서 드래그해서 산점도를 그려보세요</div>
+    <svg class="sc-svg" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="sc-legend"></div>
+  </div>
+</div>
+"""
+
+CORRELATION_SCATTER_CSS = """
+.sc-wrap { display: flex; height: 100%; box-sizing: border-box; font-family: Roboto, sans-serif; }
+.sc-side { width: 180px; flex-shrink: 0; border-right: 1px solid #eee; display: flex; flex-direction: column; padding: 8px; box-sizing: border-box; }
+.sc-search { padding: 6px 8px; font-size: 12px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 6px; }
+.sc-list { flex: 1; overflow-y: auto; }
+.sc-item { padding: 5px 6px; font-size: 11px; color: #555; cursor: grab; border-radius: 3px; user-select: none; }
+.sc-item:hover { background: #f0f0f0; }
+.sc-main { flex: 1; padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; }
+.sc-drops { display: flex; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
+.sc-drop { flex: 1; border: 2px dashed #ccc; border-radius: 4px; padding: 8px; text-align: center; font-size: 11px; color: #999; }
+.sc-drop.sc-drop-over { border-color: #3f51b5; background: #eef0fb; }
+.sc-drop.sc-drop-filled { border-style: solid; color: #333; font-weight: 600; }
+.sc-status { font-size: 11px; color: #999; margin-bottom: 4px; flex-shrink: 0; }
+.sc-svg { flex: 1; width: 100%; min-height: 0; }
+.sc-legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; color: #666; flex-shrink: 0; }
+.sc-legend-item { display: flex; align-items: center; gap: 3px; }
+.sc-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+"""
+
+CORRELATION_SCATTER_JS = """
+var API_PORT = 8093;
+var CLASS_COLORS = {
+    'Center': '#e53935', 'Donut': '#fb8c00', 'Edge-Loc': '#fdd835', 'Edge-Ring': '#43a047',
+    'Loc': '#00acc1', 'Random': '#5e35b1', 'Scratch': '#3949ab', 'Near-full': '#d81b60', 'none': '#9e9e9e'
+};
+
+function apiBase() { return 'http://' + window.location.hostname + ':' + API_PORT; }
+
+self.onInit = function() {
+    var container = self.ctx.$container[0];
+    self.ctx.scSensors = [];
+    self.ctx.scAxis = { x: null, y: null };
+
+    fetch(apiBase() + '/api/sensors').then(function(r) { return r.json(); }).then(function(data) {
+        self.ctx.scSensors = data.sensors || [];
+        renderList(self.ctx.scSensors);
+    }).catch(function() {
+        container.querySelector('.sc-status').textContent = 'equipment_log_server(:' + API_PORT + ') 연결 실패';
+    });
+
+    container.querySelector('.sc-search').addEventListener('input', function(e) {
+        var q = e.target.value.toLowerCase();
+        renderList(self.ctx.scSensors.filter(function(s) { return s.toLowerCase().indexOf(q) >= 0; }));
+    });
+
+    container.querySelectorAll('.sc-drop').forEach(function(dropEl) {
+        dropEl.addEventListener('dragover', function(e) { e.preventDefault(); dropEl.classList.add('sc-drop-over'); });
+        dropEl.addEventListener('dragleave', function() { dropEl.classList.remove('sc-drop-over'); });
+        dropEl.addEventListener('drop', function(e) {
+            e.preventDefault();
+            dropEl.classList.remove('sc-drop-over');
+            var sensor = e.dataTransfer.getData('text/plain');
+            var axis = dropEl.getAttribute('data-axis');
+            self.ctx.scAxis[axis] = sensor;
+            dropEl.textContent = axis.toUpperCase() + ': ' + sensor;
+            dropEl.classList.add('sc-drop-filled');
+            if (self.ctx.scAxis.x && self.ctx.scAxis.y) renderScatter();
+        });
+    });
+
+    function renderList(sensors) {
+        var listEl = container.querySelector('.sc-list');
+        listEl.innerHTML = '';
+        sensors.forEach(function(s) {
+            var item = document.createElement('div');
+            item.className = 'sc-item';
+            item.textContent = s;
+            item.setAttribute('draggable', 'true');
+            item.addEventListener('dragstart', function(e) { e.dataTransfer.setData('text/plain', s); });
+            listEl.appendChild(item);
+        });
+    }
+};
+
+function renderScatter() {
+    var container = self.ctx.$container[0];
+    var statusEl = container.querySelector('.sc-status');
+    var svg = container.querySelector('.sc-svg');
+    var legendEl = container.querySelector('.sc-legend');
+    statusEl.textContent = '불러오는 중...';
+
+    var url = apiBase() + '/api/scatter?x=' + encodeURIComponent(self.ctx.scAxis.x) + '&y=' + encodeURIComponent(self.ctx.scAxis.y);
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        var points = data.points || [];
+        if (!points.length) { statusEl.textContent = '데이터 없음'; return; }
+        var xs = points.map(function(p) { return p.x; });
+        var ys = points.map(function(p) { return p.y; });
+        var xMin = Math.min.apply(null, xs), xMax = Math.max.apply(null, xs);
+        var yMin = Math.min.apply(null, ys), yMax = Math.max.apply(null, ys);
+        var pad = 30, w = 520, h = 380;
+        function sx(x) { return pad + (x - xMin) / (xMax - xMin || 1) * (w - 2 * pad); }
+        function sy(y) { return h - pad - (y - yMin) / (yMax - yMin || 1) * (h - 2 * pad); }
+
+        var circles = points.map(function(p) {
+            var color = CLASS_COLORS[p.defect_class] || '#999';
+            return '<circle cx="' + sx(p.x) + '" cy="' + sy(p.y) + '" r="3" fill="' + color + '" fill-opacity="0.65"><title>' +
+                p.defect_class + ' / ' + p.wafer_id + '</title></circle>';
+        }).join('');
+        svg.innerHTML = '<line x1="' + pad + '" y1="' + (h - pad) + '" x2="' + (w - pad) + '" y2="' + (h - pad) + '" stroke="#ccc" />' +
+            '<line x1="' + pad + '" y1="' + pad + '" x2="' + pad + '" y2="' + (h - pad) + '" stroke="#ccc" />' + circles;
+
+        var classesPresent = {};
+        points.forEach(function(p) { classesPresent[p.defect_class] = true; });
+        legendEl.innerHTML = Object.keys(classesPresent).sort().map(function(c) {
+            return '<span class="sc-legend-item"><span class="sc-legend-dot" style="background:' + (CLASS_COLORS[c] || '#999') + '"></span>' + c + '</span>';
+        }).join('');
+
+        statusEl.textContent = data.x + ' vs ' + data.y + ' (' + points.length + '개 웨이퍼, 클래스당 최대 200개 샘플)';
+    }).catch(function() {
+        statusEl.textContent = 'equipment_log_server(:' + API_PORT + ') 연결 실패';
+    });
+}
+
+self.onDataUpdated = function() {};
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
+# ---------------------------------------------------------------------------
+# Custom widgets: Sensor Table + Risk Alert (Plans.md 3.2), both replace the
+# remaining Phase 3 placeholders on "Wafer Detail". Both subscribe to the same
+# lot_id/wafer_index telemetry as the Wafer Yield Map widget (so they always
+# describe whatever wafer is currently shown) and independently fetch
+# /api/wafer-sensors from equipment_log_server.py -- no shared state between
+# the two widgets, simplest thing that works.
+# ---------------------------------------------------------------------------
+SENSOR_TABLE_HTML = """
+<div class="st-wrap">
+  <div class="st-status"></div>
+  <table class="st-table"><thead><tr><th>센서</th><th>값</th><th>기준평균</th><th>편차(σ)</th></tr></thead><tbody></tbody></table>
+</div>
+"""
+
+SENSOR_TABLE_CSS = """
+.st-wrap { height: 100%; overflow-y: auto; box-sizing: border-box; padding: 8px 12px; font-family: Roboto, sans-serif; }
+.st-status { font-size: 11px; color: #999; margin-bottom: 6px; }
+.st-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.st-table th { text-align: left; color: #888; font-weight: 500; padding: 4px 6px; border-bottom: 1px solid #eee; position: sticky; top: 0; background: white; }
+.st-table td { padding: 3px 6px; border-bottom: 1px solid #f5f5f5; }
+.st-dev-high { color: #e53935; font-weight: 600; }
+"""
+
+SENSOR_TABLE_JS = """
+var API_PORT = 8093;
+var Z_THRESHOLD = 2.0;
+function apiBase() { return 'http://' + window.location.hostname + ':' + API_PORT; }
+
+function latestValue(ctx, keyIndex) {
+    var series = ctx.data && ctx.data[keyIndex] && ctx.data[keyIndex].data;
+    if (!series || !series.length) return null;
+    return series[series.length - 1][1];
+}
+
+self.onInit = function() {};
+
+self.onDataUpdated = function() {
+    var container = self.ctx.$container[0];
+    if (!container) return;
+    var lotId = latestValue(self.ctx, 0);
+    var waferIndex = latestValue(self.ctx, 1);
+    if (lotId == null || waferIndex == null) return;
+    var key = lotId + '_' + waferIndex;
+    if (self.ctx.stLastKey === key) return;
+    self.ctx.stLastKey = key;
+
+    var statusEl = container.querySelector('.st-status');
+    var tbody = container.querySelector('tbody');
+    statusEl.textContent = '불러오는 중...';
+
+    fetch(apiBase() + '/api/wafer-sensors?lot_id=' + encodeURIComponent(lotId) + '&wafer_index=' + encodeURIComponent(waferIndex))
+        .then(function(r) { return r.json(); }).then(function(data) {
+            if (data.error) { statusEl.textContent = data.error; tbody.innerHTML = ''; return; }
+            statusEl.textContent = data.defect_class + ' 소유 센서 ' + data.sensors.length + '개 (wafer ' + data.wafer_id + ')';
+            tbody.innerHTML = data.sensors.map(function(s) {
+                var devClass = Math.abs(s.deviation_std) > Z_THRESHOLD ? 'st-dev-high' : '';
+                return '<tr><td>' + s.param + '</td><td>' + s.value.toFixed(2) + '</td><td>' + s.baseline_mean.toFixed(2) +
+                    '</td><td class="' + devClass + '">' + s.deviation_std.toFixed(2) + '</td></tr>';
+            }).join('');
+        }).catch(function() {
+            statusEl.textContent = 'equipment_log_server(:' + API_PORT + ') 연결 실패';
+        });
+};
+
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
+RISK_ALERT_HTML = """<div class="ra-wrap"><div class="ra-headline"></div><div class="ra-list"></div></div>"""
+
+RISK_ALERT_CSS = """
+.ra-wrap { height: 100%; box-sizing: border-box; padding: 10px 12px; font-family: Roboto, sans-serif; overflow-y: auto; }
+.ra-headline { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.ra-headline.ra-ok { color: #2e7d32; }
+.ra-headline.ra-warn { color: #e53935; }
+.ra-row { font-size: 11px; color: #555; padding: 3px 0; border-bottom: 1px solid #f5f5f5; }
+"""
+
+RISK_ALERT_JS = """
+var API_PORT = 8093;
+var Z_THRESHOLD = 2.0;
+function apiBase() { return 'http://' + window.location.hostname + ':' + API_PORT; }
+
+function latestValue(ctx, keyIndex) {
+    var series = ctx.data && ctx.data[keyIndex] && ctx.data[keyIndex].data;
+    if (!series || !series.length) return null;
+    return series[series.length - 1][1];
+}
+
+self.onInit = function() {};
+
+self.onDataUpdated = function() {
+    var container = self.ctx.$container[0];
+    if (!container) return;
+    var lotId = latestValue(self.ctx, 0);
+    var waferIndex = latestValue(self.ctx, 1);
+    if (lotId == null || waferIndex == null) return;
+    var key = lotId + '_' + waferIndex;
+    if (self.ctx.raLastKey === key) return;
+    self.ctx.raLastKey = key;
+
+    var headlineEl = container.querySelector('.ra-headline');
+    var listEl = container.querySelector('.ra-list');
+    headlineEl.className = 'ra-headline';
+    headlineEl.textContent = '불러오는 중...';
+
+    fetch(apiBase() + '/api/wafer-sensors?lot_id=' + encodeURIComponent(lotId) + '&wafer_index=' + encodeURIComponent(waferIndex))
+        .then(function(r) { return r.json(); }).then(function(data) {
+            if (data.error) { headlineEl.textContent = data.error; listEl.innerHTML = ''; return; }
+            var over = data.sensors.filter(function(s) { return Math.abs(s.deviation_std) > Z_THRESHOLD; });
+            if (over.length === 0) {
+                headlineEl.className = 'ra-headline ra-ok';
+                headlineEl.textContent = '정상 범위 (|σ|>' + Z_THRESHOLD + ' 센서 없음)';
+            } else {
+                headlineEl.className = 'ra-headline ra-warn';
+                headlineEl.textContent = '⚠ ' + over.length + '개 센서 임계치(|σ|>' + Z_THRESHOLD + ') 초과';
+            }
+            listEl.innerHTML = over.slice(0, 3).map(function(s) {
+                return '<div class="ra-row">' + s.param + ': ' + s.deviation_std.toFixed(2) + 'σ (값 ' + s.value.toFixed(2) + ')</div>';
+            }).join('');
+        }).catch(function() {
+            headlineEl.textContent = 'equipment_log_server(:' + API_PORT + ') 연결 실패';
+        });
+};
+
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
+
 def data_key(name, key_type="timeseries", label=None, extra=None):
     dk = {"name": name, "type": key_type, "label": label or name, "settings": {}}
     if extra:
@@ -613,7 +887,8 @@ def build_overview_dashboard(alias_id, class_overview_fqn):
                 "cardCss": (
                     ".yield-wrap { display:flex; align-items:center; justify-content:space-around;"
                     " height:100%; font-family: Roboto, sans-serif; padding:12px; box-sizing:border-box; }\n"
-                    ".yield-wrap img { max-height: 85%; border-radius: 50%; border: 4px solid #f0f0f0; }\n"
+                    ".yield-wrap img { max-height: 85%; border-radius: 50%; border: 4px solid #f0f0f0;"
+                    " image-rendering: pixelated; image-rendering: crisp-edges; }\n"
                     ".yield-stat { text-align:center; }\n"
                     ".yield-stat .big { font-size: 42px; font-weight: 300; color:#2e7d32; }\n"
                     ".yield-stat .sub { font-size: 13px; color:#888; margin-top:6px; }"
@@ -855,8 +1130,157 @@ def apply_pipeline_progress_widget():
     print("pipeline_progress_fqn:", pipeline_progress_fqn)
 
 
+def apply_yield_map_css_fix():
+    """Patch the live "Wafer Detail" dashboard in place: add image-rendering:
+    pixelated/crisp-edges to the "Wafer Yield Map (최근 웨이퍼)" widget's cardCss.
+
+    Without this the browser re-blurs the (already crisp, NEAREST-rendered) wafer
+    PNG when the CSS scales it up to fill the card -- see Plans.md wafer-image
+    quality fix. Update-in-place like apply_pipeline_progress_widget(), same
+    tenant-admin login requirement.
+    """
+    token = login()
+    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/tenant/dashboards?pageSize=50&page=0", headers=headers)
+    resp.raise_for_status()
+    match = next((d for d in resp.json()["data"] if d["title"] == "Wafer Detail"), None)
+    if match is None:
+        raise RuntimeError('no dashboard titled "Wafer Detail" found -- check the live title first')
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/dashboard/{match['id']['id']}", headers=headers)
+    resp.raise_for_status()
+    dashboard = resp.json()
+
+    widgets = dashboard["configuration"]["widgets"]
+    target_id = next(
+        (wid for wid, w in widgets.items() if w.get("config", {}).get("title") == "Wafer Yield Map (최근 웨이퍼)"),
+        None,
+    )
+    if target_id is None:
+        raise RuntimeError('no "Wafer Yield Map (최근 웨이퍼)" widget on "Wafer Detail" -- title changed?')
+
+    css = widgets[target_id]["config"]["settings"]["cardCss"]
+    if "image-rendering" not in css:
+        css = css.replace(
+            "border: 4px solid #f0f0f0; }",
+            "border: 4px solid #f0f0f0; image-rendering: pixelated; image-rendering: crisp-edges; }",
+        )
+        widgets[target_id]["config"]["settings"]["cardCss"] = css
+
+    result = save_dashboard(token, dashboard)
+    print("updated Wafer Detail dashboard id:", result["id"]["id"])
+
+
+def apply_correlation_scatter_widget():
+    """Add the drag-and-drop correlation scatter widget to the live "Wafer
+    Overview" dashboard (Plans.md 3.2) -- appended as a new row below the
+    existing content (Lot Analysis / Composite gallery / Wafer gallery /
+    slider / root-cause summary all already fill rows 0-16), not replacing
+    anything. Same update-in-place approach as apply_pipeline_progress_widget.
+    """
+    token = login()
+    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/tenant/dashboards?pageSize=50&page=0", headers=headers)
+    resp.raise_for_status()
+    match = next((d for d in resp.json()["data"] if d["title"] == "Wafer Overview"), None)
+    if match is None:
+        raise RuntimeError('no dashboard titled "Wafer Overview" found -- check the live title first')
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/dashboard/{match['id']['id']}", headers=headers)
+    resp.raise_for_status()
+    dashboard = resp.json()
+
+    entity_alias_id = next(iter(dashboard["configuration"]["entityAliases"]))
+    scatter_fqn = create_widget_type(
+        token, "Daol FAScope Correlation Scatter",
+        "Drag 2 sensors onto X/Y to scatter-plot them by defect class, talks to equipment_log_server.py",
+        CORRELATION_SCATTER_HTML, CORRELATION_SCATTER_CSS, CORRELATION_SCATTER_JS, size_x=24, size_y=12,
+    )
+    wid, w = widget(
+        scatter_fqn, "latest", 24, 12, 17, 0,
+        {"datasources": [], "title": "결함-센서 상관관계 (드래그해서 탐색)", "showTitle": True, "settings": {}},
+    )
+    dashboard["configuration"]["widgets"][wid] = w
+    dashboard["configuration"]["states"]["default"]["layouts"]["main"]["widgets"][wid] = {
+        "sizeX": w["sizeX"], "sizeY": w["sizeY"], "row": w["row"], "col": w["col"],
+    }
+
+    result = save_dashboard(token, dashboard)
+    print("updated Wafer Overview dashboard id:", result["id"]["id"])
+    print("correlation_scatter_fqn:", scatter_fqn)
+
+
+def apply_detail_sensor_widgets():
+    """Replace "Wafer Detail"'s remaining two Phase 3 placeholders
+    ("설비/공정 텔레메트리", "공정 위험 지표") with the sensor table and risk
+    alert widgets (Plans.md 3.2). Both read the same lot_id/wafer_index
+    telemetry the Wafer Yield Map widget already uses, so they always
+    describe whatever wafer is currently shown.
+    """
+    token = login()
+    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/tenant/dashboards?pageSize=50&page=0", headers=headers)
+    resp.raise_for_status()
+    match = next((d for d in resp.json()["data"] if d["title"] == "Wafer Detail"), None)
+    if match is None:
+        raise RuntimeError('no dashboard titled "Wafer Detail" found -- check the live title first')
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/dashboard/{match['id']['id']}", headers=headers)
+    resp.raise_for_status()
+    dashboard = resp.json()
+
+    widgets = dashboard["configuration"]["widgets"]
+    entity_alias_id = next(iter(dashboard["configuration"]["entityAliases"]))
+    telemetry_datasource = [entity_datasource(entity_alias_id, [
+        data_key("lot_id", "timeseries", "lot_id"),
+        data_key("wafer_index", "timeseries", "wafer_index"),
+    ])]
+
+    targets = {
+        "설비/공정 텔레메트리": (
+            "Daol FAScope Sensor Table", "Scrollable table of the current wafer's owned sensor group",
+            SENSOR_TABLE_HTML, SENSOR_TABLE_CSS, SENSOR_TABLE_JS, "센서 데이터 (현재 웨이퍼)",
+        ),
+        "공정 위험 지표": (
+            "Daol FAScope Risk Alert", "Threshold-crossing summary for the current wafer's sensors",
+            RISK_ALERT_HTML, RISK_ALERT_CSS, RISK_ALERT_JS, "공정 위험 지표",
+        ),
+    }
+
+    for placeholder_title, (name, desc, html, css, js, new_title) in targets.items():
+        target_id = next(
+            (wid for wid, w in widgets.items() if w.get("config", {}).get("title") == placeholder_title),
+            None,
+        )
+        if target_id is None:
+            raise RuntimeError(f'no "{placeholder_title}" placeholder widget on "Wafer Detail" -- already replaced?')
+        fqn = create_widget_type(token, name, desc, html, css, js, size_x=6, size_y=6)
+        old = widgets[target_id]
+        widgets[target_id] = {
+            **old,
+            "typeFullFqn": fqn,
+            "type": "latest",
+            "config": {
+                "datasources": telemetry_datasource,
+                "title": new_title, "showTitle": True, "settings": {},
+            },
+        }
+
+    result = save_dashboard(token, dashboard)
+    print("updated Wafer Detail dashboard id:", result["id"]["id"])
+
+
 if __name__ == "__main__":
     if "--apply-pipeline-progress" in sys.argv:
         apply_pipeline_progress_widget()
+    elif "--apply-yield-map-css-fix" in sys.argv:
+        apply_yield_map_css_fix()
+    elif "--apply-correlation-scatter" in sys.argv:
+        apply_correlation_scatter_widget()
+    elif "--apply-detail-sensor-widgets" in sys.argv:
+        apply_detail_sensor_widgets()
     else:
         main()
