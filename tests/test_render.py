@@ -1,5 +1,5 @@
 import numpy as np
-from wafer_fa.render import compute_die_yield, render_wafer_map
+from daol_fascope.render import compute_die_yield, render_wafer_map
 
 
 def test_render_shape_and_mode():

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from wafer_fa.build_dashboard_data import _attr_key, build_lot_pattern_counts
+from daol_fascope.build_dashboard_data import _attr_key, build_lot_pattern_counts
 
 
 def test_attr_key_sanitizes_hyphen():

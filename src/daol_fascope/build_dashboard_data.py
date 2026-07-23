@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import requests
 
-from wafer_fa.composite import compute_composite
-from wafer_fa.labels import CLASSES
+from daol_fascope.composite import compute_composite
+from daol_fascope.labels import CLASSES
 
 PROCESSED_DIR = "data/processed"
 MANIFEST = f"{PROCESSED_DIR}/manifest.csv"

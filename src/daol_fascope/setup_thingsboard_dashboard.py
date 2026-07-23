@@ -1,4 +1,4 @@
-"""One-time setup: create the wafer-fa custom widget types + two dashboards in
+"""One-time setup: create the daol-fascope custom widget types + two dashboards in
 ThingsBoard -- "Wafer Overview" (control-room style, mirrors data/dashboard_sample2.png)
 and "Wafer Detail" (lot/pattern drill-down, mirrors data/dashboard_sample.png).
 Re-running creates duplicates (no upsert) -- only meant to be run once against a
@@ -6,6 +6,7 @@ fresh tenant.
 """
 import json
 import os
+import sys
 import uuid
 
 import requests
@@ -332,7 +333,7 @@ WAFER_GALLERY_CSS = """
 """
 
 # Fetches from wafer_browser_server.py (stdlib http.server, run separately --
-# see `python -m wafer_fa.wafer_browser_server`). The full manifest (~173k
+# see `python -m daol_fascope.wafer_browser_server`). The full manifest (~173k
 # wafers, all classes including "none") is way past what fits in one TB
 # device attribute, so this widget paginates against that API on scroll
 # instead of reading data through self.ctx.data at all.
@@ -394,6 +395,110 @@ self.onResize = function() {};
 self.onDestroy = function() {};
 """
 
+# Button + 5-box progress bar for wafer_predict_server.py (:8092, run separately
+# -- see `python -m daol_fascope.wafer_predict_server`). POSTs /api/predict on click
+# (fire-and-forget, server responds 202/409 immediately) and colors the 5 boxes
+# purely from the latest pipeline_stage/pipeline_stage_error_node telemetry --
+# no other source of truth. See docs/adr/0005.
+PIPELINE_PROGRESS_HTML = """
+<div class="pp-wrap">
+  <button class="pp-run-btn">랜덤 샘플 실행</button>
+  <div class="pp-status"></div>
+  <div class="pp-steps">
+    <div class="pp-step" data-stage="classify">샘플링/분류</div>
+    <div class="pp-step" data-stage="describe">결함 설명</div>
+    <div class="pp-step" data-stage="root_cause">원인 분석</div>
+    <div class="pp-step" data-stage="severity">심각도 판정</div>
+    <div class="pp-step" data-stage="recipe">해결책 제안</div>
+  </div>
+</div>
+"""
+
+PIPELINE_PROGRESS_CSS = """
+.pp-wrap { display: flex; align-items: center; height: 100%; padding: 0 16px; box-sizing: border-box; font-family: Roboto, sans-serif; gap: 16px; }
+.pp-run-btn { flex-shrink: 0; padding: 10px 16px; border-radius: 4px; border: none; background: #3f51b5; color: white; font-size: 13px; cursor: pointer; }
+.pp-run-btn:disabled { opacity: 0.5; cursor: default; }
+.pp-status { flex-shrink: 0; width: 160px; font-size: 12px; color: #999; }
+.pp-steps { flex: 1; display: flex; gap: 8px; }
+.pp-step { flex: 1; text-align: center; padding: 10px 4px; border-radius: 4px; font-size: 12px; border: 1px solid #ddd; background: white; color: #bbb; transition: background 0.3s, color 0.3s; }
+.pp-step.pp-done { background: #e0e0e0; color: #888; border-color: #e0e0e0; }
+.pp-step.pp-current { background: #ff9800; color: white; border-color: #ff9800; font-weight: 600; }
+.pp-step.pp-error { background: #e53935; color: white; border-color: #e53935; font-weight: 600; }
+"""
+
+PIPELINE_PROGRESS_JS = """
+var STAGES = ['classify', 'describe', 'root_cause', 'severity', 'recipe'];
+var API_PORT = 8092;
+
+function apiBase() {
+    return 'http://' + window.location.hostname + ':' + API_PORT;
+}
+
+self.onInit = function() {
+    var container = self.ctx.$container[0];
+    var btn = container.querySelector('.pp-run-btn');
+    var statusEl = container.querySelector('.pp-status');
+    btn.addEventListener('click', function() {
+        btn.disabled = true;
+        statusEl.textContent = '요청 전송 중...';
+        fetch(apiBase() + '/api/predict', { method: 'POST' }).then(function(resp) {
+            if (resp.status === 202) {
+                statusEl.textContent = '';
+            } else if (resp.status === 409) {
+                statusEl.textContent = '이미 실행 중입니다';
+            } else {
+                statusEl.textContent = '요청 실패 (' + resp.status + ')';
+            }
+        }).catch(function() {
+            statusEl.textContent = 'wafer_predict_server(:' + API_PORT + ') 연결 실패';
+        }).then(function() {
+            btn.disabled = false;
+        });
+    });
+    self.onDataUpdated();
+};
+
+self.onDataUpdated = function() {
+    var container = self.ctx.$container[0];
+    if (!container) return;
+    if (!(self.ctx.data && self.ctx.data[0] && self.ctx.data[0].data && self.ctx.data[0].data.length)) return;
+
+    var stage = self.ctx.data[0].data[self.ctx.data[0].data.length - 1][1];
+    var errorNode = null;
+    if (self.ctx.data[1] && self.ctx.data[1].data && self.ctx.data[1].data.length) {
+        errorNode = self.ctx.data[1].data[self.ctx.data[1].data.length - 1][1];
+    }
+
+    var boundaryIndex = -1;
+    if (stage === 'error') {
+        boundaryIndex = STAGES.indexOf(errorNode);
+    } else if (stage !== 'idle' && stage !== 'done') {
+        boundaryIndex = STAGES.indexOf(stage);
+    }
+
+    container.querySelectorAll('.pp-step').forEach(function(el) {
+        var idx = STAGES.indexOf(el.getAttribute('data-stage'));
+        el.classList.remove('pp-done', 'pp-current', 'pp-pending', 'pp-error');
+        if (stage === 'done') {
+            el.classList.add('pp-done');
+        } else if (stage === 'idle') {
+            el.classList.add('pp-pending');
+        } else if (stage === 'error' && idx === boundaryIndex) {
+            el.classList.add('pp-error');
+        } else if (idx < boundaryIndex) {
+            el.classList.add('pp-done');
+        } else if (idx === boundaryIndex) {
+            el.classList.add('pp-current');
+        } else {
+            el.classList.add('pp-pending');
+        }
+    });
+};
+
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
 
 def data_key(name, key_type="timeseries", label=None, extra=None):
     dk = {"name": name, "type": key_type, "label": label or name, "settings": {}}
@@ -442,7 +547,7 @@ def make_dashboard(title, alias_id, widgets):
             "entityAliases": {
                 alias_id: {
                     "id": alias_id,
-                    "alias": "Wafer-FA Pipeline Device",
+                    "alias": "Daol FAScope Pipeline Device",
                     "filter": {
                         "type": "singleEntity",
                         "singleEntity": {"entityType": "DEVICE", "id": DEVICE_ID},
@@ -657,19 +762,19 @@ def main():
     token = login()
 
     lot_analysis_fqn = create_widget_type(
-        token, "Wafer-FA Lot Analysis", "Lot select + per-pattern count table + trend bars",
+        token, "Daol FAScope Lot Analysis", "Lot select + per-pattern count table + trend bars",
         LOT_ANALYSIS_HTML, LOT_ANALYSIS_CSS, LOT_ANALYSIS_JS, size_x=12, size_y=8,
     )
     slider_fqn = create_widget_type(
-        token, "Wafer-FA Threshold Slider", "Writable model confidence threshold slider",
+        token, "Daol FAScope Threshold Slider", "Writable model confidence threshold slider",
         SLIDER_HTML, SLIDER_CSS, SLIDER_JS, size_x=6, size_y=3,
     )
     class_overview_fqn = create_widget_type(
-        token, "Wafer-FA Class Overview", "Global per-pattern defect counts, aggregated from lot_pattern_counts",
+        token, "Daol FAScope Class Overview", "Global per-pattern defect counts, aggregated from lot_pattern_counts",
         CLASS_OVERVIEW_HTML, CLASS_OVERVIEW_CSS, CLASS_OVERVIEW_JS, size_x=6, size_y=10,
     )
     wafer_gallery_fqn = create_widget_type(
-        token, "Wafer-FA Wafer Gallery", "Infinite-scroll grid over the full wafer dataset (all classes incl. none), paginated via wafer_browser_server.py",
+        token, "Daol FAScope Wafer Gallery", "Infinite-scroll grid over the full wafer dataset (all classes incl. none), paginated via wafer_browser_server.py",
         WAFER_GALLERY_HTML, WAFER_GALLERY_CSS, WAFER_GALLERY_JS, size_x=19, size_y=8,
     )
 
@@ -689,5 +794,69 @@ def main():
     print("wafer_gallery_fqn:", wafer_gallery_fqn)
 
 
+def apply_pipeline_progress_widget():
+    """Patch the live "Wafer Detail" dashboard in place: swap its "공정 단계
+    타임라인" Phase 3 placeholder for the button + 5-node progress bar.
+
+    Update-in-place (GET current config, edit one widget entry, POST the whole
+    thing back with its existing "id") rather than recreate-from-scratch, so it
+    doesn't clobber anything hand-edited in the TB UI since the original setup()
+    run -- see Plans.md Phase 2.5.4 for why that already happened once here.
+
+    Needs THINGSBOARD_ADMIN_USERNAME/PASSWORD for a *tenant admin* account
+    (sysadmin's own login can log in fine but can't see tenant dashboards --
+    GET /api/tenant/dashboards 302s to the login page for it). Tenant admin is
+    admin@daol-fascope.local per Plans.md; password is stored outside this repo.
+    """
+    token = login()
+    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/tenant/dashboards?pageSize=50&page=0", headers=headers)
+    resp.raise_for_status()
+    match = next((d for d in resp.json()["data"] if d["title"] == "Wafer Detail"), None)
+    if match is None:
+        raise RuntimeError('no dashboard titled "Wafer Detail" found -- check the live title first')
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/dashboard/{match['id']['id']}", headers=headers)
+    resp.raise_for_status()
+    dashboard = resp.json()
+
+    widgets = dashboard["configuration"]["widgets"]
+    target_id = next(
+        (wid for wid, w in widgets.items() if w.get("config", {}).get("title") == "공정 단계 타임라인"),
+        None,
+    )
+    if target_id is None:
+        raise RuntimeError('no "공정 단계 타임라인" placeholder widget on "Wafer Detail" -- already replaced?')
+
+    entity_alias_id = next(iter(dashboard["configuration"]["entityAliases"]))
+    pipeline_progress_fqn = create_widget_type(
+        token, "Daol FAScope Pipeline Progress",
+        "Run button + 5-stage pipeline progress bar, talks to wafer_predict_server.py",
+        PIPELINE_PROGRESS_HTML, PIPELINE_PROGRESS_CSS, PIPELINE_PROGRESS_JS, size_x=12, size_y=6,
+    )
+
+    old = widgets[target_id]
+    widgets[target_id] = {
+        **old,
+        "typeFullFqn": pipeline_progress_fqn,
+        "type": "latest",
+        "config": {
+            "datasources": [entity_datasource(entity_alias_id, [
+                data_key("pipeline_stage", "timeseries", "pipeline_stage"),
+                data_key("pipeline_stage_error_node", "timeseries", "pipeline_stage_error_node"),
+            ])],
+            "title": "파이프라인 실행", "showTitle": True, "settings": {},
+        },
+    }
+
+    result = save_dashboard(token, dashboard)
+    print("updated Wafer Detail dashboard id:", result["id"]["id"])
+    print("pipeline_progress_fqn:", pipeline_progress_fqn)
+
+
 if __name__ == "__main__":
-    main()
+    if "--apply-pipeline-progress" in sys.argv:
+        apply_pipeline_progress_widget()
+    else:
+        main()

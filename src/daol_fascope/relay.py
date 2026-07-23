@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 import requests
 import torch
@@ -6,7 +6,7 @@ from langgraph.graph import END, StateGraph
 from PIL import Image
 from transformers import LlavaForConditionalGeneration, LlavaProcessor
 
-from wafer_fa.cases import search_cases
+from daol_fascope.cases import search_cases
 
 LLAVA_MODEL = "llava-hf/llava-1.5-7b-hf"
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
@@ -77,14 +77,21 @@ class RelayState(TypedDict):
     image: Image.Image
     defect_label: str
     confidence: float
+    on_stage: Callable[[str], None] | None
     description_en: str
     root_cause_en: str
     severity_en: str
     recipe_en: str
 
 
+def _enter_stage(state: RelayState, name: str) -> None:
+    print(f"[relay] STAGE {name}", flush=True)
+    if state.get("on_stage") is not None:
+        state["on_stage"](name)
+
+
 def describe_node(state: RelayState) -> dict:
-    print("[relay] STAGE describe", flush=True)
+    _enter_stage(state, "describe")
     prompt = (
         f"This is a semiconductor wafer map. The classifier predicted defect pattern "
         f"'{state['defect_label']}' with {state['confidence'] * 100:.1f}% confidence. "
@@ -94,7 +101,7 @@ def describe_node(state: RelayState) -> dict:
 
 
 def root_cause_node(state: RelayState) -> dict:
-    print("[relay] STAGE root_cause", flush=True)
+    _enter_stage(state, "root_cause")
     prompt = (
         f"A semiconductor wafer was classified with defect pattern '{state['defect_label']}'. "
         f"Description: {state['description_en']}\n"
@@ -104,7 +111,7 @@ def root_cause_node(state: RelayState) -> dict:
 
 
 def severity_node(state: RelayState) -> dict:
-    print("[relay] STAGE severity", flush=True)
+    _enter_stage(state, "severity")
     prompt = (
         f"Defect pattern: {state['defect_label']}. Root cause: {state['root_cause_en']}\n"
         "Classify the severity of this defect as exactly one of: "
@@ -114,7 +121,7 @@ def severity_node(state: RelayState) -> dict:
 
 
 def recipe_node(state: RelayState) -> dict:
-    print("[relay] STAGE recipe", flush=True)
+    _enter_stage(state, "recipe")
     similar = search_cases(f"{state['defect_label']} {state['root_cause_en']}")
     context = ""
     if similar:
@@ -150,9 +157,14 @@ def _build_graph():
     return _graph
 
 
-def run_relay(image: Image.Image, defect_label: str, confidence: float) -> dict:
+def run_relay(
+    image: Image.Image,
+    defect_label: str,
+    confidence: float,
+    on_stage: Callable[[str], None] | None = None,
+) -> dict:
     result = _build_graph().invoke(
-        {"image": image, "defect_label": defect_label, "confidence": confidence}
+        {"image": image, "defect_label": defect_label, "confidence": confidence, "on_stage": on_stage}
     )
     return {
         "description": translate_to_korean(result["description_en"]),

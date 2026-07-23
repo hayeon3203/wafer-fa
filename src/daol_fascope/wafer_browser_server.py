@@ -5,7 +5,7 @@ too large to push through a single ThingsBoard device attribute -- so instead
 of pre-computing everything, this serves pages on demand and the widget's JS
 does infinite scroll against it.
 
-Run: python -m wafer_fa.wafer_browser_server
+Run: python -m daol_fascope.wafer_browser_server
 """
 import base64
 import io
@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import pandas as pd
 
-from wafer_fa.render import render_wafer_map
+from daol_fascope.render import render_wafer_map
 
 PROCESSED_DIR = "data/processed"
 MANIFEST = f"{PROCESSED_DIR}/manifest.csv"

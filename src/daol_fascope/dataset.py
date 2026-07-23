@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 
-from wafer_fa.labels import LABEL_TO_IDX
-from wafer_fa.render import render_wafer_map
+from daol_fascope.labels import LABEL_TO_IDX
+from daol_fascope.render import render_wafer_map
 
 
 def _random_dihedral(matrix: np.ndarray) -> np.ndarray:

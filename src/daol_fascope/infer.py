@@ -3,9 +3,9 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoImageProcessor
 
-from wafer_fa.labels import CLASSES
-from wafer_fa.model import DinoV2Classifier
-from wafer_fa.render import render_wafer_map
+from daol_fascope.labels import CLASSES
+from daol_fascope.model import DinoV2Classifier
+from daol_fascope.render import render_wafer_map
 
 _processor = None
 

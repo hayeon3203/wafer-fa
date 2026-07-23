@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from transformers import AutoImageProcessor
 
-from wafer_fa.dataset import WaferDataset
+from daol_fascope.dataset import WaferDataset
 
 
 def test_dataset_getitem(tmp_path):

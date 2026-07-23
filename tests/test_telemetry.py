@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import requests
 
-from wafer_fa import telemetry
+from daol_fascope import telemetry
 
 
 def test_send_classification_telemetry_no_token_returns_false(monkeypatch):
@@ -57,3 +57,35 @@ def test_send_classification_telemetry_network_error_returns_false(monkeypatch):
             confidence=0.9, probs={"Center": 0.9},
         )
     assert result is False
+
+
+def test_send_pipeline_stage_no_token_returns_false(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "")
+    assert telemetry.send_pipeline_stage("classify") is False
+
+
+def test_send_pipeline_stage_posts_payload(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    monkeypatch.setattr(telemetry, "THINGSBOARD_URL", "http://tb.local")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = True
+        result = telemetry.send_pipeline_stage("describe")
+    assert result is True
+    url, kwargs = mock_post.call_args[0][0], mock_post.call_args[1]
+    assert url == "http://tb.local/api/v1/tok123/telemetry"
+    assert kwargs["json"] == {"pipeline_stage": "describe"}
+
+
+def test_send_pipeline_stage_error_includes_error_node(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = True
+        telemetry.send_pipeline_stage("error", error_node="root_cause")
+    payload = mock_post.call_args[1]["json"]
+    assert payload == {"pipeline_stage": "error", "pipeline_stage_error_node": "root_cause"}
+
+
+def test_send_pipeline_stage_network_error_returns_false(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    with patch.object(telemetry.requests, "post", side_effect=requests.RequestException("boom")):
+        assert telemetry.send_pipeline_stage("classify") is False

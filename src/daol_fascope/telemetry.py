@@ -6,6 +6,28 @@ THINGSBOARD_URL = os.environ.get("THINGSBOARD_URL", "http://localhost:8082")
 THINGSBOARD_DEVICE_TOKEN = os.environ.get("THINGSBOARD_DEVICE_TOKEN", "")
 
 
+def _post(payload: dict) -> bool:
+    if not THINGSBOARD_DEVICE_TOKEN:
+        return False
+    try:
+        resp = requests.post(
+            f"{THINGSBOARD_URL}/api/v1/{THINGSBOARD_DEVICE_TOKEN}/telemetry",
+            json=payload,
+            timeout=5,
+        )
+        return resp.ok
+    except requests.RequestException:
+        return False
+
+
+def send_pipeline_stage(stage: str, error_node: str | None = None) -> bool:
+    """POST the current pipeline_stage for the ThingsBoard Detail dashboard's progress bar."""
+    payload = {"pipeline_stage": stage}
+    if error_node is not None:
+        payload["pipeline_stage_error_node"] = error_node
+    return _post(payload)
+
+
 def send_classification_telemetry(
     *,
     lot_id,
@@ -25,8 +47,6 @@ def send_classification_telemetry(
     Optional integration: returns False (never raises) if THINGSBOARD_DEVICE_TOKEN
     isn't set or the request fails, so the classifier demo works with ThingsBoard down.
     """
-    if not THINGSBOARD_DEVICE_TOKEN:
-        return False
     payload = {
         "lot_id": lot_id,
         "wafer_index": wafer_index,
@@ -47,12 +67,4 @@ def send_classification_telemetry(
         payload["recipe"] = recipe
     if wafer_image_b64 is not None:
         payload["wafer_image"] = wafer_image_b64
-    try:
-        resp = requests.post(
-            f"{THINGSBOARD_URL}/api/v1/{THINGSBOARD_DEVICE_TOKEN}/telemetry",
-            json=payload,
-            timeout=5,
-        )
-        return resp.ok
-    except requests.RequestException:
-        return False
+    return _post(payload)

@@ -1,6 +1,6 @@
 import numpy as np
 
-from wafer_fa.composite import compute_composite
+from daol_fascope.composite import compute_composite
 
 
 def test_compute_composite_shape_and_mode():

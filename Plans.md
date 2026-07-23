@@ -1,4 +1,4 @@
-# wafer-fa Plans.md
+# daol-fascope Plans.md
 
 작성일: 2026-07-22
 
@@ -44,7 +44,7 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 | 2.4 | RecipeAdvisor 에이전트 (해결책 제안) | 조치 제안 1개 이상 출력 | 2.3 | cc:완료 |
 | 2.5 | LangGraph 릴레이 오케스트레이션 + Streamlit UI 확장 (에이전트별 결과 섹션) | 4개 에이전트 순차 실행 결과가 화면에 순서대로 표시 | 2.1-2.4 | cc:완료 |
 
-**진행 메모 (2.1-2.5)**: `src/wafer_fa/relay.py`(LangGraph 4-노드 릴레이, LLaVA 직접 호출, exaone3.5:7.8b 번역) + `src/wafer_fa/cases.py`(Qdrant `wafer_defect_cases` 빈 컬렉션 + 검색) 구현, `app.py`에 배선. `pytest tests/test_relay.py tests/test_cases.py` 통과(그래프 상태 전달·심각도 파싱은 mock, Qdrant 검색은 실제 서비스 대상 통합 테스트). `llava-hf/llava-1.5-7b-hf` 최초 다운로드(14GB, `~/.cache/huggingface/hub`에 캐시, 이후 재다운로드 없음) + 실제 구동 + Streamlit 브라우저(`172.16.4.228:8501`)에서 4개 에이전트 결과 표시 사용자 확인 완료. 트러블슈팅: `device_map="auto"`에 `accelerate` 누락 → 설치, PYTHONPATH=src 누락으로 재시작 시 `wafer_fa` 모듈 못 찾던 문제 → `PYTHONPATH=src streamlit run app.py`로 재기동.
+**진행 메모 (2.1-2.5)**: `src/daol_fascope/relay.py`(LangGraph 4-노드 릴레이, LLaVA 직접 호출, exaone3.5:7.8b 번역) + `src/daol_fascope/cases.py`(Qdrant `wafer_defect_cases` 빈 컬렉션 + 검색) 구현, `app.py`에 배선. `pytest tests/test_relay.py tests/test_cases.py` 통과(그래프 상태 전달·심각도 파싱은 mock, Qdrant 검색은 실제 서비스 대상 통합 테스트). `llava-hf/llava-1.5-7b-hf` 최초 다운로드(14GB, `~/.cache/huggingface/hub`에 캐시, 이후 재다운로드 없음) + 실제 구동 + Streamlit 브라우저(`172.16.4.228:8501`)에서 4개 에이전트 결과 표시 사용자 확인 완료. 트러블슈팅: `device_map="auto"`에 `accelerate` 누락 → 설치, PYTHONPATH=src 누락으로 재시작 시 `wafer_fa` 모듈 못 찾던 문제 → `PYTHONPATH=src streamlit run app.py`로 재기동.
 
 **확정 사항** (grilling 완료, [ADR 0004](docs/adr/0004-llava-relay-no-langchain.md) 참고): 텔레메트리 불필요(결함 클래스+도메인 지식만, Phase 3 선행 불필요) / LLaVA(HF transformers 직접 로드, LangChain 없음) 4에이전트 통일, DefectDescriber만 이미지 입력 / 영어 추론 후 exaone3.5:7.8b(Ollama)로 한국어 번역 / Qdrant `wafer_defect_cases` 컬렉션(nomic-embed-text)은 지금 만들고 검색 로직도 구현, 케이스 데이터는 비워둔 채 백로그로 이관.
 
@@ -77,11 +77,40 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 **트러블슈팅 노트 (향후 ThingsBoard 위젯 작업 시 참고, 2026-07-23 정정)**: 대시보드 위젯의 `typeFullFqn`은 **시스템/테넌트 위젯 둘 다 반드시 `system.` 또는 `tenant.` 접두사 필요**(예: `system.cards.html_value_card`, `tenant.wafer_fa_lot_analysis`). 접두사 없으면 JSON 저장 자체는 200으로 성공하지만 브라우저에서 "연결된 위젯 타입이 삭제되었습니다" 에러 발생. 서버 `thingsboard.jar`의 `WidgetTypeController.getWidgetType(fqn)`을 `javap -c`로 직접 디컴파일해 확인함 — `fqn.split("\\.")`한 첫 조각이 `"system"`/`"tenant"` 둘 중 하나가 아니면(즉 접두사 없이 bare fqn이면) `ThingsboardException("Invalid fqn!", BAD_REQUEST_PARAMS)`를 그대로 던짐, tenant로 암묵 fallback 같은 거 없음. (이전 버전 노트에 "tenant 커스텀 위젯타입은 접두사 없이 그대로 사용"이라고 적혀 있었는데 틀린 내용이었음 — 2.5.3에서 만든 커스텀 위젯 4개가 전부 이 버그로 깨져있었고, 라이브 DB `dashboard.configuration`/`create_widget_type()` 반환값에 `tenant.` 접두사 붙이는 걸로 수정함.)
 
-**진행 메모 (2.5.2)**: `lot_id`/`wafer_index`는 원본 `LSWMD.pkl`에 있던 `lotName`/`waferIndex`를 Stage 1에서는 버렸었음 — `data_prep.py`를 확장해(동일 `random_state=42` split이라 기존 분할 그대로 유지) `manifest.csv`에 두 컬럼 추가, 재실행(14초, 172,950건). 런타임마다 원본 pkl을 다시 읽는 대신 오프라인에서 한 번만 계산해 데모 응답속도 확보. Tenant/Device 프로비저닝: sysadmin으로 tenant `wafer-fa` + tenant admin 계정 생성(LOAD_DEMO=false라 기본 tenant/customer 계정 없음, 자격증명은 비공개로 별도 보관·git 미커밋), device `wafer-fa-pipeline` 생성 후 access token 발급(토큰도 비공개 보관). `src/wafer_fa/telemetry.py`(`THINGSBOARD_DEVICE_TOKEN` env, HTTP device API `/api/v1/{token}/telemetry`, 네트워크 실패 시 예외 삼키고 False 반환 — 대시보드 다운돼도 데모 안 끊기게) 추가, `app.py`에서 릴레이 완료 직후(심각도 포함) 전송하도록 배선. `pytest tests/test_telemetry.py` 통과(no-token/성공/네트워크 예외 3 케이스, requests.post mock). 실제 전송 검증: 샘플 텔레메트리 전송 후 `GET /api/plugins/telemetry/DEVICE/{id}/values/timeseries`로 lot_id/wafer_index/defect_class/confidence/prob_*/severity 전부 수신 확인. Streamlit 서버(`172.16.4.228:8501`)를 `THINGSBOARD_DEVICE_TOKEN` env 포함해 재기동.
+**진행 메모 (2.5.2)**: `lot_id`/`wafer_index`는 원본 `LSWMD.pkl`에 있던 `lotName`/`waferIndex`를 Stage 1에서는 버렸었음 — `data_prep.py`를 확장해(동일 `random_state=42` split이라 기존 분할 그대로 유지) `manifest.csv`에 두 컬럼 추가, 재실행(14초, 172,950건). 런타임마다 원본 pkl을 다시 읽는 대신 오프라인에서 한 번만 계산해 데모 응답속도 확보. Tenant/Device 프로비저닝: sysadmin으로 tenant `daol-fascope` + tenant admin 계정 생성(LOAD_DEMO=false라 기본 tenant/customer 계정 없음, 자격증명은 비공개로 별도 보관·git 미커밋), device `daol-fascope-pipeline` 생성 후 access token 발급(토큰도 비공개 보관). `src/daol_fascope/telemetry.py`(`THINGSBOARD_DEVICE_TOKEN` env, HTTP device API `/api/v1/{token}/telemetry`, 네트워크 실패 시 예외 삼키고 False 반환 — 대시보드 다운돼도 데모 안 끊기게) 추가, `app.py`에서 릴레이 완료 직후(심각도 포함) 전송하도록 배선. `pytest tests/test_telemetry.py` 통과(no-token/성공/네트워크 예외 3 케이스, requests.post mock). 실제 전송 검증: 샘플 텔레메트리 전송 후 `GET /api/plugins/telemetry/DEVICE/{id}/values/timeseries`로 lot_id/wafer_index/defect_class/confidence/prob_*/severity 전부 수신 확인. Streamlit 서버(`172.16.4.228:8501`)를 `THINGSBOARD_DEVICE_TOKEN` env 포함해 재기동.
 
-**진행 메모 (2.5.3)**: telemetry 페이로드 확장(`die_yield`/`die_yield_pct`, `description`, `root_cause`, `recipe`, `wafer_image` base64, `render.compute_die_yield` 신규 + 테스트). `src/wafer_fa/composite.py`: 클래스별 실제 다이 단위 평균(NEAREST 리사이즈 후 defect비율/coverage 계산, 3단 그라디언트 색상) composite 히트맵 계산 — Center 패턴은 중심부 hot spot이 뚜렷하게 나옴(물리적으로 타당). `src/wafer_fa/build_dashboard_data.py`: manifest 전체(클래스당 최대 3000 샘플)로 9개 composite PNG + `lot_pattern_counts`(lot×label 카운트, 10,762 lot) + `sample_wafers`(클래스당 4장, 실제 웨이퍼 썸네일+정답라벨) 계산 후 device client attribute로 push(~1.4초). `src/wafer_fa/setup_thingsboard_dashboard.py`: ThingsBoard REST로 커스텀 위젯타입 4개(Lot Analysis 콤보, Threshold Slider, Class Overview — lot_pattern_counts를 전체 집계해 막대로, Wafer Gallery — sample_wafers를 그리드로) + 시스템 위젯 재사용(`system.cards.html_value_card`=Yield Map/Risk&Alerts/Composite갤러리/원인분석요약, `system.cards.html_card`=Phase 3 placeholder) 조합해 **Wafer Overview + Wafer Detail 별도 대시보드 2개** 생성(REST `POST /api/dashboard` 2회). JSON 스키마 유효성(서버 200 응답, GET으로 구조/fqn 재확인)은 검증했으나 **브라우저 렌더링(커스텀 JS 위젯 동작, 실제 레이아웃 비율)은 claude-in-chrome 미연결로 직접 확인 못함 — 사용자가 `http://172.16.4.228:8082`에서 "Wafer Overview"/"Wafer Detail" 두 대시보드 눈으로 확인 필요**.
+**진행 메모 (2.5.3)**: telemetry 페이로드 확장(`die_yield`/`die_yield_pct`, `description`, `root_cause`, `recipe`, `wafer_image` base64, `render.compute_die_yield` 신규 + 테스트). `src/daol_fascope/composite.py`: 클래스별 실제 다이 단위 평균(NEAREST 리사이즈 후 defect비율/coverage 계산, 3단 그라디언트 색상) composite 히트맵 계산 — Center 패턴은 중심부 hot spot이 뚜렷하게 나옴(물리적으로 타당). `src/daol_fascope/build_dashboard_data.py`: manifest 전체(클래스당 최대 3000 샘플)로 9개 composite PNG + `lot_pattern_counts`(lot×label 카운트, 10,762 lot) + `sample_wafers`(클래스당 4장, 실제 웨이퍼 썸네일+정답라벨) 계산 후 device client attribute로 push(~1.4초). `src/daol_fascope/setup_thingsboard_dashboard.py`: ThingsBoard REST로 커스텀 위젯타입 4개(Lot Analysis 콤보, Threshold Slider, Class Overview — lot_pattern_counts를 전체 집계해 막대로, Wafer Gallery — sample_wafers를 그리드로) + 시스템 위젯 재사용(`system.cards.html_value_card`=Yield Map/Risk&Alerts/Composite갤러리/원인분석요약, `system.cards.html_card`=Phase 3 placeholder) 조합해 **Wafer Overview + Wafer Detail 별도 대시보드 2개** 생성(REST `POST /api/dashboard` 2회). JSON 스키마 유효성(서버 200 응답, GET으로 구조/fqn 재확인)은 검증했으나 **브라우저 렌더링(커스텀 JS 위젯 동작, 실제 레이아웃 비율)은 claude-in-chrome 미연결로 직접 확인 못함 — 사용자가 `http://172.16.4.228:8082`에서 "Wafer Overview"/"Wafer Detail" 두 대시보드 눈으로 확인 필요**.
 
 **TODO (미연결 배선)**: `모델 임계값 슬라이더`(`confidence_threshold` attribute)는 현재 위젯이 값 저장(write)/표시(read-back)만 하고, 실제 파이프라인(`infer.py`/`relay.py`/`app.py`) 어디서도 이 값을 읽지 않음 — UI만 있고 기능 미배선. `confidence`는 `app.py`에서 `classify_matrix()`(DINOv2 9-클래스 softmax) 결과 중 예측 라벨(`max(probs, key=probs.get)`)의 확률값. 추후 이 슬라이더 값을 예측 confidence 임계값으로 써서(예: 임계값 미만이면 "불확실한 예측"으로 별도 표시하거나 알림 억제) 실제 배선할 예정.
+
+---
+
+## Phase 2.5.4: ThingsBoard 통합 실행 버튼 + 파이프라인 진행 시각화 (grilling 완료, 2026-07-23)
+
+목적: Phase 3 진입 전, Phase 1/2 전체 파이프라인(분류→4-agent relay)을 Streamlit이 아닌 ThingsBoard 안에서 버튼 하나로 실행·확인. "지금 어느 단계를 지나는지" 5단계 진행바로 실시간 시각화.
+
+| Task | 내용 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 2.5.4.1 | 대시보드 이름 스왑 (Wafer Detail↔Wafer Overview) | ThingsBoard 콘솔에서 두 대시보드 제목이 뒤바뀌어 표시 | 2.5.3 | cc:완료 (사용자가 이 grilling 세션 이전에 TB 브라우저 UI에서 직접 이미 스왑해둠 — 확인만 함) |
+| 2.5.4.2 | `wafer_predict_server.py`(:8092) 신설 — 랜덤 샘플 뽑기+classify+relay 4-node 실행, in-flight lock, `pipeline_stage` telemetry push(idle/classify/describe/root_cause/severity/recipe/done/error) | 요청 시 202 즉시 응답, 단계별 telemetry가 ThingsBoard에 순서대로 수신 확인 | 2.5.4.1 | cc:완료 (TDD, `pytest tests/test_wafer_predict_server.py` 통과. 실제 :8092 기동+브라우저 확인은 사용자 몫) |
+| 2.5.4.3 | `relay.py` 4개 노드 함수에 단계 시작 시 telemetry push 훅 추가 | 노드 진입 시점마다 `pipeline_stage` 값 갱신 확인 | 2.5.4.2 | cc:완료 (2.5.4.2와 같은 diff로 병합 진행 — `run_relay(..., on_stage=...)` 콜백 추가, `pytest tests/test_relay.py` 통과) |
+| 2.5.4.4 | `app.py`에서 relay(Phase 2) 실행 코드 제거, 새 서버로 완전 이관 | `app.py`가 더 이상 LLaVA/relay 호출 안 함 | 2.5.4.2 | cc:완료 (Stage 1 classify만 남김, telemetry 전송도 제거 — app.py는 이제 로컬 스모크테스트 전용) |
+| 2.5.4.5 | Wafer Detail 대시보드(=Defect Detection/Wafer Yield Map/Process Risk&Alerts가 있는 쪽)의 "공정 단계 타임라인" Phase3 placeholder 자리(row10 col6, 12x6, 라이브에도 아직 존재 확인됨)를 버튼+5노드 진행바 커스텀 위젯으로 교체 | 버튼 클릭 시 5박스가 회색/주황/흰색/빨강으로 실시간 갱신되는 게 브라우저에서 확인됨 | 2.5.4.1, 2.5.4.3 | cc:완료 (`--apply-pipeline-progress` 실행 완료, dashboard id `b4a41820-85af-11f1-b7a9-c1826206c77f`, fqn `tenant.wafer_fa_pipeline_progress`. 실제 버튼 클릭+박스 색 갱신 브라우저 확인은 사용자 몫 — :8092 서버 떠 있어야 함) |
+
+**진행 메모 (2.5.4.1)**: `setup_thingsboard_dashboard.py`의 `build_overview_dashboard()`/`build_detail_dashboard()` 함수명·`make_dashboard("Wafer Overview"/"Wafer Detail", ...)` 문자열은 여전히 예전(스왑 전) 이름 그대로 — 라이브 TB 제목은 사용자가 UI에서 직접 스왑해서 지금은 함수명과 실제 제목이 반대로 매핑됨. 당장 문제는 아니지만 헷갈리지 않게 참고.
+
+**버그 발견+수정 (2026-07-23)**: TB UI의 대시보드 Rename은 `dashboard.title`만 바꾸고 `configuration.states.default.name`(대시보드 상단 breadcrumb이 실제로 읽는 값)은 안 건드림 — 스크립트가 처음 만들 때 `make_dashboard(title, ...)`이 이 둘을 같은 문자열로 같이 박아넣지만 그 이후론 독립된 필드라, UI에서 title만 바꾸면 둘이 벌어짐. 두 대시보드 다 title은 스왑됐는데 state.name은 스왑 전 값 그대로 남아있던 것 확인 — GET 대시보드 config → `states.*.name`을 `title`로 맞춰서 PUT(update-in-place)으로 수정함(tenant admin API, 2026-07-23).
+
+**진행 메모 (2.5.4.5)**: `setup_thingsboard_dashboard.py`에 `PIPELINE_PROGRESS_HTML/CSS/JS`(버튼+5박스, `:8092`에 fetch POST, `pipeline_stage`/`pipeline_stage_error_node` telemetry 구독해서 박스 색 계산) + `apply_pipeline_progress_widget()`(라이브 "Wafer Detail" 대시보드 GET → "공정 단계 타임라인" placeholder 위젯만 새 위젯으로 교체 → POST로 update-in-place, 나머지 위젯은 안 건드림) 작성. `THINGSBOARD_ADMIN_USERNAME=admin@wafer-fa.local THINGSBOARD_ADMIN_PASSWORD=(비공개 보관) THINGSBOARD_DEVICE_ID=dd9d5c40-8588-11f1-8306-c1826206c77f python -m daol_fascope.setup_thingsboard_dashboard --apply-pipeline-progress`로 2026-07-23 라이브 반영 완료. (tenant admin 로그인 이메일 `admin@wafer-fa.local` 자체는 실제 계정 식별자라 리네임 대상에서 제외 — TB 쪽 tenant/device 이름은 이번 리네임에서 안 건드림, 아래 "프로젝트 리네임" 메모 참고)
+
+**프로젝트 리네임 (2026-07-23, 사용자 지시)**: 서비스명 "Wafer-FA" → **"Daol FAScope"**로 확정.
+- 리포 디렉토리 `/home/admin/wafer-fa` → `/home/admin/daol-fascope` 이동, 파이썬 패키지 `src/wafer_fa/` → `src/daol_fascope/`(모든 `import`/테스트 갱신, `pytest` 34개 통과 확인).
+- 문서(Plans.md/CONTEXT.md/plans 하위 harness 파일)·코드(Streamlit 페이지 제목, ThingsBoard 위젯 표시명) 상의 "Wafer-FA"/"wafer-fa" 텍스트 "Daol FAScope"/"daol-fascope"로 교체. 단, 실제 라이브 자격증명(tenant admin 이메일 `admin@wafer-fa.local`)·이미 초기화된 TimescaleDB의 `POSTGRES_DB/USER=wafer_fa`·과거 트러블슈팅 기록에 나오는 실제 fqn 값(`tenant.wafer_fa_lot_analysis` 등)은 안 건드림(현재 상태와 실제 라이브 값이 어긋나면 더 혼란스러워서 의도적으로 스킵).
+- Docker 컨테이너 `wafer-fa-thingsboard`/`wafer-fa-tb-postgres`/`wafer-fa-timescaledb` → `daol-fascope-*`로 재생성. **볼륨은 기존 `wafer-fa_*` 볼륨에 `external: true`로 고정 바인딩**(디렉토리 리네임으로 Compose 기본 프로젝트명이 바뀌면서 그냥 `up`하면 새 빈 볼륨을 만들 뻔한 함정 — `docker-compose.yml` 참고) — 재생성 후 대시보드 2개/텔레메트리 이력 전부 보존 확인.
+- **ThingsBoard 콘솔 브랜딩(탭 제목/파비콘) 시도 → 실패+롤백**: `thingsboard.jar` 안의 nested jar(`BOOT-INF/lib/ui-ngx-4.3.1.3.jar`) 안 `public/index.html`(제목)/`public/thingsboard.ico`(파비콘)을 고쳐서 `jar uf`로 재패킹 시도 — 바깥 jar가 416MB→20MB(entry 1개만 남음)로 깨짐. 즉시 컨테이너 내리고 원본 이미지(`thingsboard/tb-node:4.3.1.3`, 미변경)로 재생성해서 복구, 데이터 손실 없음 확인. **탭 제목/파비콘은 여전히 기본 "ThingsBoard"로 남아있음 — 재시도 여부 미정(cc:TODO 아님, 사용자 판단 대기)**.
+- TB 쪽 tenant 이름("wafer-fa")/device 이름("wafer-fa-pipeline")은 이번 리네임 범위에서 제외(로그인 자격증명과 얽혀있고 실제 데모 화면엔 안 보이는 admin 전용 정보라 리스크 대비 효과 낮다고 판단).
+
+**확정 사항** (grilling 완료, [ADR 0005](docs/adr/0005-dedicated-warm-prediction-server.md) 참고): 새 서버가 LLaVA+DINOv2 유일한 warm 프로세스(이중 로딩 방지 위해 `app.py`의 relay 코드는 삭제) / fire-and-forget 비동기 + in-flight lock(중복 실행 거부) / 진행 상태는 오직 `pipeline_stage` telemetry로만 판단(별도 status API 없음, 위젯은 자기 단계 index와 최신값 비교로 색 계산) / 5단계는 `CONTEXT.md`의 "Pipeline Stage" 참고(Classify/Describe/RootCause/Severity/Recipe) / 결과 표시용 위젯은 별도 신설 안 함 — 개명 후 Wafer Detail의 기존 Yield Map/Risk&Alerts가 같은 device latest telemetry 구독이라 자동 갱신됨 / 색상: 지나간=`#e0e0e0`, 현재=`#ff9800`(주황, 기존 `#3f51b5`/`#e53935`과 의미 충돌 피함), 미도달=흰색+`#ddd` 테두리, 에러=`#e53935`.
 
 ---
 
@@ -96,7 +125,7 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 **미확정 사항**: 합성 텔레메트리 생성 모델(규칙 기반 vs 실제 팹 분포 샘플링), 데모 목적상 필요한 "그럴듯함"의 수준.
 
-**선반영**: SemiFA 참고해 TimescaleDB 컨테이너(`docker-compose.yml`, `wafer-fa-timescaledb`, localhost:5433, DB/user `wafer_fa`)와 빈 hypertable `equipment_telemetry`(time/wafer_id/defect_class/equipment_id/param/value)를 3.1 착수 전에 미리 만들어둠. 데이터 없음, 3.1의 합성 로그 생성기가 나중에 채움.
+**선반영**: SemiFA 참고해 TimescaleDB 컨테이너(`docker-compose.yml`, `daol-fascope-timescaledb`, localhost:5433, DB/user `wafer_fa`)와 빈 hypertable `equipment_telemetry`(time/wafer_id/defect_class/equipment_id/param/value)를 3.1 착수 전에 미리 만들어둠. 데이터 없음, 3.1의 합성 로그 생성기가 나중에 채움.
 
 ---
 
@@ -106,3 +135,5 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 - `docs/adr/0001-matrix-input-no-image-upload.md`
 - `docs/adr/0002-frozen-dinov2-base-mlp-head.md`
 - `docs/adr/0003-thingsboard-over-tailadmin-dashboard.md`
+- `docs/adr/0004-llava-relay-no-langchain.md`
+- `docs/adr/0005-dedicated-warm-prediction-server.md`

@@ -9,7 +9,7 @@ import pandas.core.indexes.base as _indexes_base
 import pandas.core.indexes.range as _indexes_range
 from sklearn.model_selection import train_test_split
 
-from wafer_fa.labels import LABEL_TO_IDX
+from daol_fascope.labels import LABEL_TO_IDX
 
 RAW_PATH = Path("data/raw/LSWMD.pkl")
 OUT_DIR = Path("data/processed")

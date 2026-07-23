@@ -1,5 +1,5 @@
 import torch
-from wafer_fa.model import DinoV2Classifier
+from daol_fascope.model import DinoV2Classifier
 
 
 def test_backbone_frozen_head_trainable():

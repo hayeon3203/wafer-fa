@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from wafer_fa.wafer_browser_server import page_to_items, query_page, render_thumb_b64
+from daol_fascope.wafer_browser_server import page_to_items, query_page, render_thumb_b64
 
 
 def _manifest():
@@ -27,7 +27,7 @@ def test_query_page_filters_by_label_including_none():
 
 
 def test_page_to_items(tmp_path, monkeypatch):
-    monkeypatch.setattr("wafer_fa.wafer_browser_server.PROCESSED_DIR", str(tmp_path))
+    monkeypatch.setattr("daol_fascope.wafer_browser_server.PROCESSED_DIR", str(tmp_path))
     render_thumb_b64.cache_clear()
     np.save(tmp_path / "a.npy", np.array([[1, 2], [1, 1]], dtype=np.uint8))
     page = pd.DataFrame([{"lot_id": "lot1", "wafer_index": 0, "label": "Center", "path": "a.npy"}])

@@ -1,9 +1,9 @@
 import numpy as np
 import torch
 
-from wafer_fa.infer import classify_matrix
-from wafer_fa.labels import CLASSES
-from wafer_fa.model import DinoV2Classifier
+from daol_fascope.infer import classify_matrix
+from daol_fascope.labels import CLASSES
+from daol_fascope.model import DinoV2Classifier
 
 
 def test_classify_matrix_returns_full_distribution(tmp_path):

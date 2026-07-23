@@ -3,6 +3,11 @@ data/
 checkpoints/
 __pycache__/
 *.pyc
-.claude/
+.claude/state/
+.claude/settings.local.json
+.claude/ralph-loop.local.md
+.claude/ralph-state.local.md
+.claude/ralph-status.local.json
+scripts/ralph/runs/
 out/
 *.log

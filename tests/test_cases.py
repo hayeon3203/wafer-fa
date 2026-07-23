@@ -1,4 +1,4 @@
-from wafer_fa import cases
+from daol_fascope import cases
 
 
 def test_search_cases_returns_similar_case_after_add():

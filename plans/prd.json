@@ -1,0 +1,33 @@
+{
+  "repo": "daol-fascope",
+  "verifyCommand": "PYTHONPATH=src .venv/bin/python -m pytest",
+  "acceptanceCriteria": [
+    "Verification command passes (pytest)",
+    "All non-skipped tasks completed"
+  ],
+  "features": [
+    {
+      "id": "F-001",
+      "title": "합성 장비 로그 생성기 (SECS/GEM 형태, 결함 클래스와 상관되게)",
+      "acceptanceCriteria": [
+        "결함 클래스별로 구분되는 합성 로그 데이터셋 생성",
+        "pytest로 검증 가능한 생성 로직"
+      ],
+      "priority": "medium",
+      "passes": false,
+      "notes": "Plans.md Phase 3 (3.1). 미확정: 생성 모델(규칙 기반 vs 실제 팹 분포 샘플링), 데모용 '그럴듯함' 수준 — 착수 시 판단 필요. TimescaleDB hypertable equipment_telemetry(빈 상태, daol-fascope-timescaledb, localhost:5433)는 이미 준비되어 있음. Depends: Phase 1 (완료)."
+    },
+    {
+      "id": "F-002",
+      "title": "ThingsBoard 텔레메트리 수집기로 합성 장비 로그 전송 + 상관관계 위젯 추가",
+      "acceptanceCriteria": [
+        "ThingsBoard 대시보드에 결함-로그 상관 시각화 1개 이상 표시"
+      ],
+      "priority": "medium",
+      "passes": false,
+      "skip": true,
+      "skipReason": "선행 조건 미충족: Phase 2.5(대시보드)가 아직 미완성 — 2.5.3 브라우저 렌더링 확인이 사용자 몫으로 남아 있음. Phase 2.5 완료 후 skip 해제.",
+      "notes": "Plans.md Phase 3 (3.2). Depends: F-001, Phase 2.5."
+    }
+  ]
+}

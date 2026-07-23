@@ -18,3 +18,7 @@ _Avoid_: failure type, defect category
 **Digital Twin Feed**:
 The intended production source of wafer map matrices — auto-collected from a digital twin of the fab equipment, not a camera photo. The classifier's real input is this raw matrix; a rendered image is only a display/model-input step derived from it.
 _Avoid_: wafer camera, wafer photo (as the production source)
+
+**Pipeline Stage**:
+One of five sequential steps a single wafer sample passes through end to end: Classify (Stage 1 DINOv2) → Describe → Root Cause → Severity → Recipe (Stage 2 relay). Distinct from a relay node — the relay graph itself only has the last four; Classify is a Stage 1 step folded into the same stage sequence for progress display.
+_Avoid_: node, step (alone — ambiguous with relay node)

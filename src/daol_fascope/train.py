@@ -7,9 +7,9 @@ from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader
 from transformers import AutoImageProcessor
 
-from wafer_fa.dataset import WaferDataset
-from wafer_fa.labels import CLASSES, LABEL_TO_IDX
-from wafer_fa.model import DinoV2Classifier
+from daol_fascope.dataset import WaferDataset
+from daol_fascope.labels import CLASSES, LABEL_TO_IDX
+from daol_fascope.model import DinoV2Classifier
 
 MANIFEST = "data/processed/manifest.csv"
 PROCESSED_DIR = "data/processed"

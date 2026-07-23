@@ -1,6 +1,6 @@
 from PIL import Image
 
-from wafer_fa import relay
+from daol_fascope import relay
 
 
 def test_parse_severity_matches_known_levels():
@@ -38,3 +38,25 @@ def test_run_relay_threads_state_through_all_four_agents(monkeypatch):
     # root_cause node must see describe node's output; recipe node must see severity's
     assert any("a ring-shaped defect near the wafer edge" in c for c in calls[1:2])
     assert any("MAJOR" in c for c in calls[3:4])
+
+
+def test_run_relay_calls_on_stage_for_each_node_in_order(monkeypatch):
+    monkeypatch.setattr(relay, "generate", lambda prompt, image=None, max_new_tokens=200: "x")
+    monkeypatch.setattr(relay, "translate_to_korean", lambda text_en: text_en)
+    monkeypatch.setattr(relay, "search_cases", lambda query, top_k=3: [])
+
+    stages = []
+    image = Image.new("RGB", (224, 224))
+    relay.run_relay(image, defect_label="Center", confidence=0.9, on_stage=stages.append)
+
+    assert stages == ["describe", "root_cause", "severity", "recipe"]
+
+
+def test_run_relay_without_on_stage_still_works(monkeypatch):
+    monkeypatch.setattr(relay, "generate", lambda prompt, image=None, max_new_tokens=200: "x")
+    monkeypatch.setattr(relay, "translate_to_korean", lambda text_en: text_en)
+    monkeypatch.setattr(relay, "search_cases", lambda query, top_k=3: [])
+
+    image = Image.new("RGB", (224, 224))
+    result = relay.run_relay(image, defect_label="Center", confidence=0.9)
+    assert result["description"] == "x"
