@@ -48,7 +48,10 @@ def create_widget_type(token, name, description, template_html, template_css,
     }
     resp = requests.post(f"{THINGSBOARD_URL}/api/widgetType", headers=headers, json=body)
     resp.raise_for_status()
-    return resp.json()["fqn"]
+    # GET /api/widgetType?fqn=... requires a "system."/"tenant." scope prefix on
+    # the fqn or it 400s with "Invalid fqn!" -- the bare fqn returned by this API
+    # is not by itself a valid typeFullFqn for a dashboard widget reference.
+    return f"tenant.{resp.json()['fqn']}"
 
 
 # ---------------------------------------------------------------------------
@@ -309,39 +312,84 @@ self.onResize = function() {};
 self.onDestroy = function() {};
 """
 
-WAFER_GALLERY_HTML = """<div class="wg-wrap"></div>"""
+WAFER_GALLERY_HTML = """
+<div class="wg-scroll">
+  <div class="wg-status"></div>
+  <div class="wg-wrap"></div>
+  <div class="wg-sentinel"></div>
+</div>
+"""
 
 WAFER_GALLERY_CSS = """
-.wg-wrap { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; height: 100%; overflow-y: auto; box-sizing: border-box; font-family: Roboto, sans-serif; }
+.wg-scroll { height: 100%; overflow-y: auto; box-sizing: border-box; font-family: Roboto, sans-serif; }
+.wg-status { padding: 6px 10px; font-size: 11px; color: #999; }
+.wg-wrap { display: flex; flex-wrap: wrap; gap: 10px; padding: 0 10px 10px; }
 .wg-item { width: 90px; text-align: center; }
 .wg-item img { width: 80px; height: 80px; border: 1px solid #eee; border-radius: 4px; }
 .wg-cap { font-size: 11px; color: #555; margin-top: 4px; }
 .wg-sub { color: #999; }
+.wg-sentinel { height: 1px; }
 """
 
+# Fetches from wafer_browser_server.py (stdlib http.server, run separately --
+# see `python -m wafer_fa.wafer_browser_server`). The full manifest (~173k
+# wafers, all classes including "none") is way past what fits in one TB
+# device attribute, so this widget paginates against that API on scroll
+# instead of reading data through self.ctx.data at all.
 WAFER_GALLERY_JS = """
-self.onInit = function() { render(); };
-self.onDataUpdated = function() { render(); };
+var API_PORT = 8091;
+var PAGE_SIZE = 40;
 
-function render() {
+self.onInit = function() {
+    self.ctx.wgOffset = 0;
+    self.ctx.wgTotal = null;
+    self.ctx.wgLoading = false;
     var container = self.ctx.$container[0];
-    if (!container) return;
-    var wrap = container.querySelector('.wg-wrap');
-    var samples = [];
-    if (self.ctx.data && self.ctx.data[0] && self.ctx.data[0].data && self.ctx.data[0].data.length) {
-        var latest = self.ctx.data[0].data[self.ctx.data[0].data.length - 1];
-        try { samples = JSON.parse(latest[1]); } catch (e) { samples = []; }
+    container.querySelector('.wg-scroll').addEventListener('scroll', onScroll);
+    loadMore();
+};
+
+function apiBase() {
+    return 'http://' + window.location.hostname + ':' + API_PORT;
+}
+
+function onScroll(e) {
+    var el = e.target;
+    if (el.scrollTop + el.clientHeight > el.scrollHeight - 200) {
+        loadMore();
     }
-    wrap.innerHTML = '';
-    samples.forEach(function(s) {
-        var item = document.createElement('div');
-        item.className = 'wg-item';
-        item.innerHTML = '<img src="data:image/png;base64,' + s.image + '" />' +
-            '<div class="wg-cap">' + s.label + '<br/><span class="wg-sub">' + s.lot_id + ' #' + s.wafer_index + '</span></div>';
-        wrap.appendChild(item);
+}
+
+function loadMore() {
+    if (self.ctx.wgLoading) return;
+    if (self.ctx.wgTotal !== null && self.ctx.wgOffset >= self.ctx.wgTotal) return;
+    self.ctx.wgLoading = true;
+    var container = self.ctx.$container[0];
+    var statusEl = container.querySelector('.wg-status');
+    var wrapEl = container.querySelector('.wg-wrap');
+    statusEl.textContent = '로딩 중...';
+
+    var url = apiBase() + '/api/wafers?offset=' + self.ctx.wgOffset + '&limit=' + PAGE_SIZE;
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        self.ctx.wgTotal = data.total;
+        self.ctx.wgOffset += data.items.length;
+        data.items.forEach(function(s) {
+            var item = document.createElement('div');
+            item.className = 'wg-item';
+            item.innerHTML = '<img src="data:image/png;base64,' + s.image + '" />' +
+                '<div class="wg-cap">' + s.label + '<br/><span class="wg-sub">' + s.lot_id + ' #' + s.wafer_index + '</span></div>';
+            wrapEl.appendChild(item);
+        });
+        statusEl.textContent = self.ctx.wgOffset + ' / ' + data.total + ' 웨이퍼 로드됨';
+        self.ctx.wgLoading = false;
+        if (data.items.length === 0) return;
+    }).catch(function(err) {
+        statusEl.textContent = 'wafer_browser_server(:' + API_PORT + ') 연결 실패 — 서버 가동 여부 확인 필요';
+        self.ctx.wgLoading = false;
     });
 }
 
+self.onDataUpdated = function() {};
 self.onResize = function() {};
 self.onDestroy = function() {};
 """
@@ -549,7 +597,7 @@ def build_detail_dashboard(alias_id, lot_analysis_fqn, slider_fqn, wafer_gallery
         for c in composite_classes
     ]
     wid, w = widget(
-        "system.cards.html_value_card", "latest", 10, 9, 0, 14,
+        "system.cards.html_value_card", "latest", 19, 8, 9, 0,
         {
             "datasources": [entity_datasource(alias_id, composite_keys)],
             "title": "Composite 웨이퍼맵 히트맵 (패턴별 평균)", "showTitle": True,
@@ -567,12 +615,10 @@ def build_detail_dashboard(alias_id, lot_analysis_fqn, slider_fqn, wafer_gallery
     widgets[wid] = w
 
     wid, w = widget(
-        wafer_gallery_fqn, "latest", 19, 8, 9, 0,
+        wafer_gallery_fqn, "latest", 10, 9, 0, 14,
         {
-            "datasources": [entity_datasource(alias_id, [
-                data_key("sample_wafers", "attribute", "sample_wafers"),
-            ])],
-            "title": "Wafers from Data (샘플 갤러리)", "showTitle": True, "settings": {},
+            "datasources": [],
+            "title": "전체 웨이퍼 데이터", "showTitle": True, "settings": {},
         },
     )
     widgets[wid] = w
@@ -623,7 +669,7 @@ def main():
         CLASS_OVERVIEW_HTML, CLASS_OVERVIEW_CSS, CLASS_OVERVIEW_JS, size_x=6, size_y=10,
     )
     wafer_gallery_fqn = create_widget_type(
-        token, "Wafer-FA Wafer Gallery", "Grid of real sample wafer thumbnails with predicted labels",
+        token, "Wafer-FA Wafer Gallery", "Infinite-scroll grid over the full wafer dataset (all classes incl. none), paginated via wafer_browser_server.py",
         WAFER_GALLERY_HTML, WAFER_GALLERY_CSS, WAFER_GALLERY_JS, size_x=19, size_y=8,
     )
 
