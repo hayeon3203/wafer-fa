@@ -174,6 +174,27 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 ---
 
+## Phase 4: Kafka 실시간 스트리밍 스모크테스트 (확인용, 2026-07-24)
+
+목적: "Kafka로 가상 데이터 스트리밍하면 진짜 실시간(밀리초 단위)으로 처리되는지" 확인. Phase 3의 배치 적재(`build_equipment_log.py`, 172,950 wafer 한 번에 COPY)와 별개 — 이건 프로덕션 기능이 아니라 일회성 성능 측정 스모크테스트. 설계/계획: [스펙](docs/superpowers/specs/2026-07-24-kafka-streaming-smoketest-design.md), [구현 계획](docs/superpowers/plans/2026-07-24-kafka-streaming-smoketest.md).
+
+**구성**: `apache/kafka`(KRaft 단일 브로커, ZooKeeper 없음) 컨테이너 추가. `kafka_common.py`(메시지 스키마: 웨이퍼 1개 = 562센서 스냅샷 = 메시지 1개), `kafka_producer.py`(기존 Phase 3.1 SECOM 샘플러 재사용, throttle 없이 최대속도 발행, `wafer_id`는 `STREAM_` 접두사로 실데이터와 분리), `kafka_consumer.py`(TimescaleDB `equipment_telemetry` 동일 테이블에 이력 + ThingsBoard에 웨이퍼당 1회 POST로 이중 적재, 단계별 ms 레이턴시 측정), `telemetry.send_equipment_snapshot()` 추가.
+
+**측정 방법**: producer/consumer를 별도 프로세스로 띄워 Kafka 토픽을 사이에 두고 비동기로 통신. consumer가 매 웨이퍼마다 (1) Kafka poll (2) TimescaleDB insert (3) ThingsBoard POST 각 단계 소요시간을 밀리초로 기록, N개 처리 후 평균/p99 요약 출력.
+
+**결과 (200웨이퍼 × 562센서 = 112,400행/회, 3회 실행 반복)**:
+- 1차(ThingsBoard 토큰 없이): e2e(producer→consumer) 평균 14.9ms/p99 108ms, DB insert 평균 6.3ms/p99 16.4ms. ThingsBoard는 토큰 없어 즉시 실패 처리(0.1ms는 무의미한 값 — 네트워크 호출 자체가 안 나감).
+- 2차(실제 디바이스 토큰 투입 + Kafka poll 구간 타이밍 추가): ThingsBoard 실제 응답 평균 33.4ms/p99 73ms(200/200 성공). 근데 웨이퍼당 총 처리시간(130.9ms)이 측정된 3단계 합(70.6ms)보다 훨씬 커서 "정체불명 갭"(~60ms/웨이퍼) 발견.
+- 3차(idle poll 시간 분리 측정 추가): 갭의 정체 확인 — `consumer.poll()`이 메시지 없어서 `None` 반환하는 대기시간이 그동안 어느 통계에도 안 잡히고 버려지고 있었음(생존편향). 이 idle 시간을 별도로 누적 집계(`Stats.idle_poll_ms_total`)하자, 측정된 작업시간 합(poll+db+tb, 웨이퍼당 평균) × 200 + idle 총합 ≈ 실제 elapsed 시간(오차 200웨이퍼 전체 통틀어 60ms 이내로 수렴) — 갭 완전히 설명됨.
+
+**결론**: Kafka 전송·DB 적재·ThingsBoard 전송 개별 단계는 전부 밀리초 단위로 확인됨(수 ms~수십 ms). 다만 전체 처리량은 무한하지 않고 producer가 데이터 만드는 속도와 consumer가 처리하는 속도 중 느린 쪽에 의해 제한됨 — 이번 측정에선 둘의 속도가 비슷해서(consumer 실작업 ~42ms/웨이퍼, producer도 비슷한 페이스) consumer가 대기(idle)하는 시간이 전체의 절반 이상을 차지하기도 함. 컨베이어벨트에서 앞 공정과 뒷 공정 속도가 비슷하면 뒷 공정이 부품 기다리며 노는 것과 같은 원리 — consumer 코드 자체가 느린 게 아니라 두 프로세스 간 속도 매칭 문제.
+
+**알려진 이슈**: 브로커에 토픽이 아직 없는 콜드 스타트 상태에서 `auto.offset.reset=latest`로 인한 레이스 컨디션 실제로 발생함(첫 실행 시 producer가 토픽을 순간적으로 만들고 메시지를 다 보내버리면, consumer의 group-join이 그보다 늦게 끝나서 "latest" 오프셋이 이미 지나간 메시지들을 영구히 놓치고 0건 처리한 채 무한 polling — 코드 버그 아니라 이 offset 정책의 알려진 함정). `kafka_producer.py`/`kafka_consumer.py` docstring에 경고 문구 추가(커밋 `cb21d8c`)로 대응.
+
+**코드**: `src/daol_fascope/kafka_common.py`, `kafka_producer.py`, `kafka_consumer.py`, `telemetry.send_equipment_snapshot()`. `docker-compose.yml`에 `kafka` 서비스. 테스트: `pytest tests/test_kafka_common.py tests/test_kafka_producer.py tests/test_kafka_consumer.py` (66개 전체 통과, 실제 브로커/DB 필요 없는 순수 로직 단위테스트). 실제 브로커 대상 라이브 검증 3회는 위 "결과" 참고. 커밋 범위: `c0b3c82..ab43e18` (subagent-driven-development로 5개 태스크 분할 구현, 태스크별 리뷰 + 최종 전체 리뷰 통과).
+
+---
+
 ## 참고 문서
 
 - `CONTEXT.md` — 도메인 용어집 (Wafer Map, Die, Defect Class, Digital Twin Feed)
