@@ -7,6 +7,11 @@ Run (start this BEFORE kafka_producer.py -- group offset reset is "latest",
 so it only sees messages produced after it subscribes, same as watching a
 real live stream rather than draining a backlog):
   PYTHONPATH=src python -m daol_fascope.kafka_consumer --wafers 1000
+
+WARNING: On a cold/reset broker, the topic must exist before the first consumer
+run (run the producer once to auto-create it, or use `kafka-topics --create`).
+If the topic is created after this consumer joins, it will miss all prior
+messages and poll forever with zero rows, despite starting before the producer.
 """
 import argparse
 import os

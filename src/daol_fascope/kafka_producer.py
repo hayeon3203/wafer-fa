@@ -7,7 +7,9 @@ Run: PYTHONPATH=src python -m daol_fascope.kafka_producer --wafers 1000
 
 Start the consumer (kafka_consumer.py) BEFORE running this -- the consumer
 group resets to "latest", so it only sees messages produced after it
-subscribes.
+subscribes. On a cold/reset broker, ensure the topic exists before the first
+consumer run (this producer auto-creates it, or pre-create with `kafka-topics
+--create`), otherwise the consumer will miss all messages and poll forever.
 """
 import argparse
 import time
