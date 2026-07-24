@@ -62,6 +62,7 @@ class Stats:
         self.db_latency_ms = []
         self.tb_latency_ms = []
         self.poll_latency_ms = []
+        self.idle_poll_ms_total = 0.0
         self.tb_failures = 0
         self.start = time.monotonic()
 
@@ -73,6 +74,13 @@ class Stats:
         self.poll_latency_ms.append(poll_ms)
         if not tb_ok:
             self.tb_failures += 1
+
+    def record_idle(self, poll_ms: float) -> None:
+        """poll() returned no message (still-empty topic or producer running
+        behind) -- time spent here is real wall-clock but belongs to no
+        wafer, so it's tracked as a separate running total rather than a
+        per-message stage."""
+        self.idle_poll_ms_total += poll_ms
 
     def summary(self) -> dict:
         elapsed = time.monotonic() - self.start
@@ -89,6 +97,7 @@ class Stats:
             "db_latency": stage(self.db_latency_ms),
             "tb_latency": stage(self.tb_latency_ms),
             "poll_latency": stage(self.poll_latency_ms),
+            "idle_poll_ms_total": self.idle_poll_ms_total,
             "tb_failures": self.tb_failures,
         }
 
@@ -99,6 +108,7 @@ class Stats:
         print(f"  kafka poll (broker fetch): avg {s['poll_latency']['avg_ms']:.1f}ms  p99 {s['poll_latency']['p99_ms']:.1f}ms")
         print(f"  timescaledb insert:  avg {s['db_latency']['avg_ms']:.1f}ms  p99 {s['db_latency']['p99_ms']:.1f}ms")
         print(f"  thingsboard post:    avg {s['tb_latency']['avg_ms']:.1f}ms  p99 {s['tb_latency']['p99_ms']:.1f}ms  ({s['tb_failures']} failed)")
+        print(f"  idle (waiting for producer, no message ready): {s['idle_poll_ms_total'] / 1000:.2f}s total")
 
 
 def run(wafers: int) -> None:
@@ -117,6 +127,7 @@ def run(wafers: int) -> None:
             msg = consumer.poll(timeout=1.0)
             poll_ms = (time.monotonic() - poll_start) * 1000
             if msg is None or msg.error():
+                stats.record_idle(poll_ms)
                 continue
             consumed_at_ms = int(time.time() * 1000)
             parsed = parse_message(msg.value())

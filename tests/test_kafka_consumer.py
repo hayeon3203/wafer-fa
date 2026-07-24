@@ -45,3 +45,17 @@ def test_stats_summary_reports_poll_latency():
     summary = stats.summary()
     assert summary["poll_latency"]["avg_ms"] == 30.0
     assert summary["poll_latency"]["p99_ms"] == 30.0
+
+
+def test_stats_accumulates_idle_poll_time():
+    stats = Stats()
+    stats.record_idle(50.0)
+    stats.record_idle(75.0)
+    assert stats.idle_poll_ms_total == 125.0
+    stats.record(e2e_ms=1.0, db_ms=1.0, tb_ms=1.0, tb_ok=True, poll_ms=1.0)
+    assert stats.summary()["idle_poll_ms_total"] == 125.0
+
+
+def test_stats_idle_poll_time_starts_at_zero():
+    stats = Stats()
+    assert stats.idle_poll_ms_total == 0.0
