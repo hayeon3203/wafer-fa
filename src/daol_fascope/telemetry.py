@@ -68,3 +68,12 @@ def send_classification_telemetry(
     if wafer_image_b64 is not None:
         payload["wafer_image"] = wafer_image_b64
     return _post(payload)
+
+
+def send_equipment_snapshot(readings: list[tuple[str, float]]) -> bool:
+    """POST one wafer's full sensor snapshot as a single telemetry payload
+    (Kafka streaming smoketest, 2026-07-24 design) -- one POST per wafer,
+    not one per sensor, so ThingsBoard's HTTP round-trip time doesn't become
+    the bottleneck the smoke test is trying to measure."""
+    payload = {param: value for param, value in readings}
+    return _post(payload)

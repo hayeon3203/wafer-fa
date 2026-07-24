@@ -89,3 +89,21 @@ def test_send_pipeline_stage_network_error_returns_false(monkeypatch):
     monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
     with patch.object(telemetry.requests, "post", side_effect=requests.RequestException("boom")):
         assert telemetry.send_pipeline_stage("classify") is False
+
+
+def test_send_equipment_snapshot_posts_one_payload_per_wafer(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    monkeypatch.setattr(telemetry, "THINGSBOARD_URL", "http://tb.local")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = True
+        result = telemetry.send_equipment_snapshot([("feature_0", 1.5), ("feature_1", -2.0)])
+    assert result is True
+    assert mock_post.call_count == 1
+    url, kwargs = mock_post.call_args[0][0], mock_post.call_args[1]
+    assert url == "http://tb.local/api/v1/tok123/telemetry"
+    assert kwargs["json"] == {"feature_0": 1.5, "feature_1": -2.0}
+
+
+def test_send_equipment_snapshot_no_token_returns_false(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "")
+    assert telemetry.send_equipment_snapshot([("feature_0", 1.0)]) is False
