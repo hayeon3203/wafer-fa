@@ -21,7 +21,7 @@ def test_stats_summary_reports_count_and_avg_latency():
     stats = Stats()
     stats.start = time.monotonic() - 2.0
     for _ in range(10):
-        stats.record(e2e_ms=50.0, db_ms=5.0, tb_ms=20.0, tb_ok=True)
+        stats.record(e2e_ms=50.0, db_ms=5.0, tb_ms=20.0, tb_ok=True, poll_ms=10.0)
     summary = stats.summary()
     assert summary["count"] == 10
     assert summary["e2e_latency"]["avg_ms"] == 50.0
@@ -33,6 +33,15 @@ def test_stats_summary_reports_count_and_avg_latency():
 
 def test_stats_counts_thingsboard_failures():
     stats = Stats()
-    stats.record(e2e_ms=1.0, db_ms=1.0, tb_ms=1.0, tb_ok=False)
-    stats.record(e2e_ms=1.0, db_ms=1.0, tb_ms=1.0, tb_ok=True)
+    stats.record(e2e_ms=1.0, db_ms=1.0, tb_ms=1.0, tb_ok=False, poll_ms=1.0)
+    stats.record(e2e_ms=1.0, db_ms=1.0, tb_ms=1.0, tb_ok=True, poll_ms=1.0)
     assert stats.summary()["tb_failures"] == 1
+
+
+def test_stats_summary_reports_poll_latency():
+    stats = Stats()
+    for _ in range(5):
+        stats.record(e2e_ms=1.0, db_ms=1.0, tb_ms=1.0, tb_ok=True, poll_ms=30.0)
+    summary = stats.summary()
+    assert summary["poll_latency"]["avg_ms"] == 30.0
+    assert summary["poll_latency"]["p99_ms"] == 30.0

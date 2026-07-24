@@ -61,14 +61,16 @@ class Stats:
         self.e2e_latency_ms = []
         self.db_latency_ms = []
         self.tb_latency_ms = []
+        self.poll_latency_ms = []
         self.tb_failures = 0
         self.start = time.monotonic()
 
-    def record(self, e2e_ms: float, db_ms: float, tb_ms: float, tb_ok: bool) -> None:
+    def record(self, e2e_ms: float, db_ms: float, tb_ms: float, tb_ok: bool, poll_ms: float) -> None:
         self.count += 1
         self.e2e_latency_ms.append(e2e_ms)
         self.db_latency_ms.append(db_ms)
         self.tb_latency_ms.append(tb_ms)
+        self.poll_latency_ms.append(poll_ms)
         if not tb_ok:
             self.tb_failures += 1
 
@@ -86,6 +88,7 @@ class Stats:
             "e2e_latency": stage(self.e2e_latency_ms),
             "db_latency": stage(self.db_latency_ms),
             "tb_latency": stage(self.tb_latency_ms),
+            "poll_latency": stage(self.poll_latency_ms),
             "tb_failures": self.tb_failures,
         }
 
@@ -93,6 +96,7 @@ class Stats:
         s = self.summary()
         print(f"processed {s['count']} wafers in {s['elapsed_sec']:.2f}s ({s['throughput_wafers_per_sec']:.1f} wafers/sec)")
         print(f"  end-to-end latency: avg {s['e2e_latency']['avg_ms']:.1f}ms  p99 {s['e2e_latency']['p99_ms']:.1f}ms")
+        print(f"  kafka poll (broker fetch): avg {s['poll_latency']['avg_ms']:.1f}ms  p99 {s['poll_latency']['p99_ms']:.1f}ms")
         print(f"  timescaledb insert:  avg {s['db_latency']['avg_ms']:.1f}ms  p99 {s['db_latency']['p99_ms']:.1f}ms")
         print(f"  thingsboard post:    avg {s['tb_latency']['avg_ms']:.1f}ms  p99 {s['tb_latency']['p99_ms']:.1f}ms  ({s['tb_failures']} failed)")
 
@@ -109,7 +113,9 @@ def run(wafers: int) -> None:
     print(f"waiting for {wafers} wafers on topic {TOPIC} ...")
     try:
         while stats.count < wafers:
+            poll_start = time.monotonic()
             msg = consumer.poll(timeout=1.0)
+            poll_ms = (time.monotonic() - poll_start) * 1000
             if msg is None or msg.error():
                 continue
             consumed_at_ms = int(time.time() * 1000)
@@ -124,7 +130,7 @@ def run(wafers: int) -> None:
             tb_ok = telemetry.send_equipment_snapshot(parsed["readings"])
             tb_ms = (time.monotonic() - tb_start) * 1000
 
-            stats.record(e2e_ms, db_ms, tb_ms, tb_ok)
+            stats.record(e2e_ms, db_ms, tb_ms, tb_ok, poll_ms)
     finally:
         consumer.close()
         conn.close()
