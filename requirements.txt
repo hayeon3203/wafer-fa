@@ -12,3 +12,4 @@ qdrant-client
 requests
 psycopg[binary]
 accelerate
+confluent-kafka
