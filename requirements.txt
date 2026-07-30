@@ -1,15 +1,18 @@
-torch
-torchvision
-transformers
-scikit-learn
-streamlit
-numpy
-pandas
-pillow
-pytest
-langgraph
-qdrant-client
-requests
-psycopg[binary]
-accelerate
-confluent-kafka
+# GB10 (aarch64, CUDA 13.x driver) 기준 고정 버전. `pip install -r requirements.txt`
+# 실행하면 PyPI가 linux_aarch64 cu130 torch wheel을 자동 선택함 — 별도 index-url 불필요.
+# 단, NVIDIA driver가 CUDA 13.0 이상이어야 torch.cuda.is_available()==True.
+torch==2.13.0
+torchvision==0.28.0
+transformers==5.14.1
+scikit-learn==1.9.0
+streamlit==1.59.2
+numpy==2.5.1
+pandas==3.0.3
+pillow==12.3.0
+pytest==9.1.1
+langgraph==1.2.9
+qdrant-client==1.18.0
+requests==2.34.2
+psycopg[binary]==3.3.4
+accelerate==1.14.0
+confluent-kafka==2.15.0

@@ -68,6 +68,19 @@ services:
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
 
+  # 새 장비 전용. 이 박스(원본 GB10)는 여러 프로젝트가 공유하는 네이티브 Qdrant가
+  # 이미 6333에 떠 있어서(wafer_defect_cases 컬렉션도 거기 있음) 이 서비스를 올리면
+  # 포트 충돌로 기동 실패함 — 의도된 동작, 이 박스에서는 `docker compose up qdrant`
+  # 하지 말 것. 새 장비엔 그런 공유 인스턴스가 없으므로 정상 기동.
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: daol-fascope-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   waferscope-nginx:
     image: nginx:alpine
     container_name: daol-fascope-waferscope-nginx
@@ -82,20 +95,16 @@ services:
       - ./nginx/logo_title_white.svg:/etc/nginx/custom/logo_title_white.svg:ro
 
 volumes:
-  # Pinned to the volumes created before the wafer-fa -> daol-fascope repo
-  # rename (2026-07-23). Compose's default project name tracks the directory
-  # basename, so without "external" here a plain `docker compose up` after
-  # the rename would silently create fresh, empty daol-fascope_* volumes
-  # instead of reattaching to the real data.
+  # name: 은 wafer-fa -> daol-fascope repo rename(2026-07-23) 이전 볼륨명을 그대로
+  # 가리켜서 이 박스의 기존 데이터에 재연결됨. external:true는 없음 — 이 이름의
+  # 볼륨이 없는 새 장비에서는 `docker compose up`이 자동으로 새로 만든다.
   timescale_data:
-    external: true
     name: wafer-fa_timescale_data
   tb_postgres_data:
-    external: true
     name: wafer-fa_tb_postgres_data
   tb_data:
-    external: true
     name: wafer-fa_tb_data
   tb_logs:
-    external: true
     name: wafer-fa_tb_logs
+  qdrant_data:
+    name: daol-fascope_qdrant_data

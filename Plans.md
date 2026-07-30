@@ -43,7 +43,7 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 | 2.1 | Stage 1 분류 결과(라벨+9클래스 확률)를 받는 DefectDescriber 에이전트 | 분류 결과 입력 시 자연어 설명 1개 이상 생성 | Phase 1 | cc:완료 |
 | 2.2 | RootCauseAnalyzer 에이전트 (원인 가설) | 결함 유형별 원인 후보 1개 이상 출력 | 2.1 | cc:완료 |
 | 2.3 | SeverityClassifier 에이전트 (CRITICAL/MAJOR/MINOR/NONE) | 4단계 중 1개 판정 출력 | 2.2 | cc:완료 |
-| 2.4 | RecipeAdvisor 에이전트 (해결책 제안) | 조치 제안 1개 이상 출력 | 2.3 | cc:완료 |
+| 2.4 | RecipeAdvisor 에이전트 (해결책 제안) | 조치 제안 1개 이상 출력 | 2.3 | cc:완료 [45e2530] |
 | 2.5 | LangGraph 릴레이 오케스트레이션 + Streamlit UI 확장 (에이전트별 결과 섹션) | 4개 에이전트 순차 실행 결과가 화면에 순서대로 표시 | 2.1-2.4 | cc:완료 |
 
 **진행 메모 (2.1-2.5)**:
@@ -286,6 +286,39 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 **테스트**: `pytest tests/test_kafka_common.py tests/test_kafka_producer.py tests/test_kafka_consumer.py` (66개 전체 통과, 실제 브로커/DB 필요 없는 순수 로직 단위테스트). 실제 브로커 대상 라이브 검증 3회는 위 "결과" 표 참고.
 
 **커밋 범위**: `c0b3c82..ab43e18` (subagent-driven-development로 5개 태스크 분할 구현, 태스크별 리뷰 + 최종 전체 리뷰 통과).
+
+---
+
+## Phase 5: 새 GB10 장비 이식 패키징 (2026-07-30)
+
+목적: 이 박스에서만 도는 상태(암묵적 공유 인프라 의존)를 벗어나, 새 GB10 장비에 clone+배포만으로 바로 실행 가능하게.
+
+**사전 감사 결과 (블로커)**: `docker-compose.yml` volume 4개가 `external:true`로 이 박스에 이미 존재하는 볼륨만 참조(새 장비에서 `docker compose up` 실패) / Qdrant가 compose에 없이 `localhost:6333` 하드코딩(이 박스에서 이미 돌던 걸 전제) / Ollama+모델(exaone3.5:7.8b, nomic-embed-text)도 compose·설치 스크립트 없이 이미 pull된 걸 전제 / `data/`,`checkpoints/`가 `.gitignore` 대상이라 git으로 안 옮겨짐(2.7GB) / `requirements.txt` 버전 미고정 / `.env.example` 없음 / `setup_thingsboard_dashboard.py` 실행 순서 README 누락.
+
+| Task | 내용 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 5.1 | `requirements.txt` 실사용 버전 고정 | `pip freeze` 값과 일치, GB10 aarch64/cu130 전제 주석 | - | cc:완료 |
+| 5.2 | `docker-compose.yml`에 Qdrant 서비스 추가 | `qdrant` 컨테이너, `qdrant_data` 볼륨 정의 | - | cc:완료 |
+| 5.3 | volume `external:true` 제거 | `name:`은 유지(기존 박스 데이터 보존), 새 장비는 자동 생성 | - | cc:완료 |
+| 5.4 | `scripts/setup_ollama_models.sh` | exaone3.5:7.8b, nomic-embed-text pull 스크립트 | - | cc:완료 |
+| 5.5 | `scripts/package_data.sh` | data/+checkpoints/ tar 패키징 | - | cc:완료 |
+| 5.6 | `.env.example` | 코드 내 모든 env var 한곳에 정리 | - | cc:완료 |
+| 5.7 | README "새 장비 배포 순서" 재작성 | 사전요구사항+0~7단계 순서, ThingsBoard 세팅·Kafka 스모크테스트 포함 | 5.1-5.6 | cc:완료 |
+| 5.8 | `docker compose config` 문법 검증 | 에러 없이 파싱, qdrant 서비스 실제 기동 테스트 | 5.2, 5.3 | cc:완료 |
+
+**진행 메모 (5.8)**:
+- `docker compose config` 파싱 정상, `external:true` 제거 후에도 기존 4개 볼륨은 여전히 `wafer-fa_*` 이름으로 매핑됨(확인 완료) — 이 박스의 기존 데이터 보존됨.
+- `docker compose up -d qdrant` 실제 기동 테스트 → **포트 6333 충돌로 실패**: 이 박스엔 여러 프로젝트가 공유하는 네이티브 Qdrant가 이미 떠 있고(`wafer_defect_cases` 컬렉션도 거기 존재, ADR 0004 기록과 일치), 새 컨테이너가 같은 포트를 못 잡음. **의도된/예상된 결과**임 — 이 박스에서는 compose qdrant 서비스를 올리지 말아야 함(주석 추가함). 새 장비엔 이런 공유 인스턴스가 없으므로 정상 기동될 것으로 예상되나, 실제 새 장비 검증은 아직 안 함. 테스트로 생성된 컨테이너/이미지는 정리 완료, 기존 서비스 6개(kafka/tb-postgres/thingsboard/timescaledb/nginx) 무영향 확인.
+
+| 5.9 | 이 박스 내 격리 검증 (운영 컨테이너/볼륨/venv 비침습) | 4항목 전부 통과 | 5.1-5.8 | cc:완료 |
+
+**진행 메모 (5.9)**:
+- **클린 설치**: `/tmp` 임시 venv에 `requirements.txt` 설치 → 에러 없음, `torch 2.13.0+cu130 cuda True` 확인. 테스트 후 venv 삭제.
+- **볼륨 재연결**: 별도 compose 프로젝트명(`daol-fascope-verify`)으로 `up` 시도 → 볼륨은 이름 기준으로 기존 `wafer-fa_timescale_data` 등을 정확히 인식(경고 로그로 확인, `external:true` 없이도 정상 동작). 컨테이너명이 compose에 고정돼 있어 운영 컨테이너와 이름 충돌 → 생성 자체는 막혔지만 **이는 운영 컨테이너를 안 건드렸다는 증거**이지 결함 아님(새 장비엔 동일 이름 컨테이너 없으므로 문제 없음). 생성된 임시 네트워크만 정리.
+- **tar round-trip**: `package_data.sh` 실행(2.7GB → 174M, 웨이퍼맵 특성상 고압축) → 압축 해제 후 `diff -rq` 무차이, `sha256sum` 완전 일치(LSWMD.pkl, best_model.pt). 임시 파일 정리.
+- **pytest**: 프로젝트 venv로 `PYTHONPATH=src pytest` → 66개 전부 통과.
+
+**여전히 미검증 (사용자 몫)**: 이 박스 안에서는 "완전히 빈 새 장비" 조건(기존 컨테이너명·볼륨·Ollama 모델 캐시·HF 캐시 전무)을 재현할 수 없음 — 실제 새 GB10 장비에서의 0~7단계 end-to-end 1회 실측은 아직 안 함. 특히 Qdrant 컨테이너 실기동(이 박스는 포트 충돌로 스킵), Ollama 모델 최초 pull, LLaVA/DINOv2 최초 HF 다운로드는 이 박스에서 원천적으로 재현 불가한 항목. 실물 이관 시 문제 발생하면 이 Phase에 트러블슈팅 추가.
 
 ---
 

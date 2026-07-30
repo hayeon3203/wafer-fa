@@ -28,7 +28,7 @@ Wafer Map은 원본 다이 테스트 결과 매트릭스이고, 화면에 보이
 | TimescaleDB | 5433 | 텔레메트리·장비 로그 저장 |
 | Kafka 프로듀서/컨슈머 | - | `equipment-telemetry-stream` 실시간 수집 스모크테스트 (Phase 4), TimescaleDB+ThingsBoard 이중 적재 |
 
-`docker-compose.yml`에 TimescaleDB / ThingsBoard(+postgres) / nginx 프록시 정의. 각 Python 서버는 컨테이너 밖에서 직접 실행.
+`docker-compose.yml`에 TimescaleDB / ThingsBoard(+postgres) / Qdrant / Kafka / nginx 프록시 정의. 각 Python 서버는 컨테이너 밖에서 직접 실행. Ollama(EXAONE 번역, 임베딩)는 컨테이너화하지 않고 호스트에 네이티브 설치(다른 GB10 프로젝트와 모델 캐시 공유 전제).
 
 ## 기술 스택
 
@@ -38,35 +38,121 @@ PyTorch / torchvision / transformers (DINOv2, LLaVA), LangGraph, Ollama(EXAONE �
 
 ```
 src/daol_fascope/     핵심 모듈 (render, infer, relay, telemetry, kafka_*, wafer_*_server 등)
-data/                 raw(LSWMD.pkl) / processed(manifest.csv + 매트릭스)
-checkpoints/          학습된 분류기 가중치
+data/                 raw(LSWMD.pkl, secom/) / processed(manifest.csv + 매트릭스) — git 미포함, 별도 이관 필요
+checkpoints/          학습된 분류기 가중치 — git 미포함, 별도 이관 필요
 tests/                pytest 테스트 (모듈당 1개)
 docs/adr/             아키텍처 결정 기록
 nginx/                ThingsBoard 리브랜딩 프록시 설정
 scripts/ralph/        자동화 루프 스크립트
+scripts/setup_ollama_models.sh  새 장비용 Ollama 모델 pull
+scripts/package_data.sh         data/+checkpoints/ tar 패키징 (이관용)
 Plans.md              작업 대장 (Phase별 진행 상황, DoD, 진행 메모)
 CONTEXT.md            용어집 (Wafer Map / Defect Class / Pipeline Stage 등)
 ```
 
-## 실행 방법
+## 새 GB10 장비 구축 매뉴얼
+
+### 0. 사전 요구사항
+
+| 항목 | 확인 방법 |
+|---|---|
+| NVIDIA driver가 CUDA 13.x 노출 | `nvidia-smi` — Driver/CUDA Version 확인. `requirements.txt`의 `torch==2.13.0`은 CUDA 13.0 aarch64 wheel 기준 |
+| Docker + Compose plugin | `docker compose version` |
+| [Ollama](https://ollama.com/download) 설치, `ollama serve` 상시 기동 | `ollama list` (systemd 서비스 등록 권장) |
+| Python 3.12 | `python3 --version` |
+| 원본 장비의 `data/`+`checkpoints/` tar (`./scripts/package_data.sh`로 생성, ~2.7GB→압축 후 ~200MB) | scp/rsync로 새 장비에 전달 |
+
+### 1. 저장소 + 데이터
 
 ```bash
-# 1. 인프라 (TimescaleDB, ThingsBoard, nginx 프록시)
-docker compose up -d
-
-# 2. 파이썬 venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# 3. 로컬 분류 데모
-streamlit run app.py --server.port 8501
-
-# 4. ThingsBoard 연동 서버 (텔레메트리 전송하려면 THINGSBOARD_DEVICE_TOKEN 필요)
-THINGSBOARD_DEVICE_TOKEN=<device-token> PYTHONPATH=src python3 -m daol_fascope.wafer_predict_server
-PYTHONPATH=src python3 -m daol_fascope.wafer_browser_server
+git clone https://github.com/hayeon3203/wafer-fa.git daol-fascope
+cd daol-fascope
+tar xzf /path/to/daol-fascope-data.tar.gz -C .   # data/ checkpoints/ 복원
 ```
 
+### 2. 인프라 컨테이너
+
+ThingsBoard는 **최초 1회 스키마 설치**가 별도로 필요함(설치 안 하고 바로 `up`하면 스키마 없어서 기동 실패) — 나머지는 바로 up 가능.
+
+```bash
+# 2-1. DB류/Qdrant/Kafka 먼저
+docker compose up -d timescaledb thingsboard-postgres qdrant kafka
+
+# 2-2. ThingsBoard 스키마 설치 (신규 볼륨에서 최초 1회만, 몇 분 소요)
+docker compose run --rm -e INSTALL_TB=true -e LOAD_DEMO=false thingsboard
+
+# 2-3. ThingsBoard 본기동 + nginx 프록시
+docker compose up -d thingsboard waferscope-nginx
+```
+
+**주의**: `qdrant` 서비스는 호스트 6333 포트를 씀. 이미 다른 프로젝트가 Qdrant를 공유 중인 박스(예: 이 프로젝트의 원본 GB10)라면 포트 충돌로 실패함 — 그런 박스에선 `qdrant` 서비스를 빼고 기존 공유 인스턴스를 그대로 씀. 완전히 새 장비라면 정상 기동.
+
+### 3. ThingsBoard Tenant/Device 프로비저닝 (콘솔 UI, 최초 1회)
+
+1. `http://<host>:8082` 접속 → 기본 sysadmin 계정 로그인: `sysadmin@thingsboard.org` / `sysadmin` (로그인 후 비밀번호 변경 권장)
+2. 좌측 메뉴 **Tenants** → `+` → 이름 입력(예: `daol-fascope`) → 저장
+3. 생성한 Tenant 클릭 → **Tenant Admins** → `+` → 이메일/비밀번호 입력 후 저장 — 이 값이 `.env`의 `THINGSBOARD_ADMIN_USERNAME`/`THINGSBOARD_ADMIN_PASSWORD`
+4. sysadmin 로그아웃 → 방금 만든 tenant admin 계정으로 재로그인
+5. **Devices** → `+` → 이름 입력(예: `daol-fascope-pipeline`) → 저장
+6. 생성한 Device 클릭 → 우측 패널에서 **Copy Device Id** → `.env`의 `THINGSBOARD_DEVICE_ID`
+7. 같은 Device의 **Manage credentials** → Access Token 복사 → `.env`의 `THINGSBOARD_DEVICE_TOKEN`
+
+### 4. Ollama 모델
+
+```bash
+./scripts/setup_ollama_models.sh   # exaone3.5:7.8b (번역), nomic-embed-text (Qdrant 임베딩)
+```
+
+### 5. 파이썬 환경
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 6. env 값 채우기
+
+```bash
+cp .env.example .env
+# THINGSBOARD_URL/DEVICE_TOKEN/ADMIN_USERNAME/ADMIN_PASSWORD/DEVICE_ID (3단계 값) 채우기
+export $(grep -v '^#' .env | xargs)
+```
+
+### 7. ThingsBoard 대시보드/위젯 세팅 (1회성)
+
+```bash
+PYTHONPATH=src python3 -m daol_fascope.setup_thingsboard_dashboard
+```
+
+Wafer Overview + Wafer Detail 대시보드 2개, 커스텀 위젯 4개가 생성됨. `http://<host>:8090`(nginx 프록시) 또는 `:8082`(직접)에서 확인.
+
+### 8. 서버 기동
+
+```bash
+# 로컬 분류 데모 (Stage 1만)
+streamlit run app.py --server.port 8501
+
+# ThingsBoard 연동 서버들
+PYTHONPATH=src python3 -m daol_fascope.wafer_predict_server
+PYTHONPATH=src python3 -m daol_fascope.wafer_browser_server
+PYTHONPATH=src python3 -m daol_fascope.equipment_log_server
+```
+
+첫 실행 시 `facebook/dinov2-base`, `llava-hf/llava-1.5-7b-hf`(~14GB)를 HuggingFace Hub에서 자동 다운로드함 — 인터넷 연결 필요, `~/.cache/huggingface/hub`에 캐시되어 이후 재다운로드 없음.
+
+Kafka 실시간 스트리밍 스모크테스트(선택, Phase 4)는 `PYTHONPATH=src python3 -m daol_fascope.kafka_consumer`와 `kafka_producer`를 별도 프로세스로 기동 — 자세한 내용은 `Plans.md` Phase 4 참고.
+
 테스트: `PYTHONPATH=src pytest`
+
+### 트러블슈팅
+
+| 증상 | 원인 / 조치 |
+|---|---|
+| `docker compose up -d thingsboard` 후 컨테이너가 재시작 반복 | 스키마 미설치. 2-2단계(`INSTALL_TB=true`) 먼저 실행 |
+| `qdrant` 컨테이너가 포트 바인딩 에러로 기동 실패 | 같은 박스에 다른 프로젝트가 쓰는 Qdrant가 이미 6333 점유 중. 그 인스턴스를 그대로 쓰고 compose `qdrant` 서비스는 스킵 |
+| `setup_thingsboard_dashboard.py` 실행 시 `KeyError` | `THINGSBOARD_ADMIN_USERNAME`/`PASSWORD`/`DEVICE_ID` 셋 다 기본값 없음(필수) — 3단계 값 `.env`에 채웠는지 확인 |
+| `pip install -r requirements.txt`가 torch를 CPU-only로 설치 | NVIDIA driver가 CUDA 13.x 미만이거나 아키텍처가 aarch64가 아님 — 0단계 사전요구사항 재확인 |
 
 ## 참고 문서
 
