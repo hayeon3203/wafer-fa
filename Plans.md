@@ -322,6 +322,52 @@ team_validation_mode: manual-pass (grilling 세션에서 각 요구사항을 하
 
 ---
 
+## Phase 6: LLaVA OpenShell 샌드박스 격리 (2026-08-04)
+
+DaolVision Task 8.2.1의 선례를 따라 LangGraph 릴레이가 쓰는 모델을 샌드박스에 가둔다.
+설계 근거와 기각한 대안은 `docs/adr/0006-llava-in-openshell-sandbox.md`.
+
+**핵심 제약(실측)**: 샌드박스는 아웃바운드가 정책상 전부 막힌다 — 샌드박스 안에서 호스트의
+Qdrant :6333 / ThingsBoard :8082 / Ollama :11434 로 curl 하면 전부 `403`. 그래서
+`wafer_predict_server`를 통째로 넣는 안은 불가능하고, **밖으로 전화를 안 거는 잎 노드**인
+모델 서버만 격리 대상이 된다.
+
+| # | 작업 | 완료 기준 | 의존 | 상태 |
+|---|------|----------|------|------|
+| 6.1 | `llava_server.py` 신설 (`/generate`, `/health`, :8506). `main()`이 리스닝 전에 모델 로드해 ADR 0005의 워밍 유지 | `pytest tests/test_llava_server.py` 통과 | - | cc:완료 |
+| 6.2 | `relay.py`에서 인프로세스 LLaVA 제거, `generate()`를 HTTP 호출로 교체. `torch`/`transformers` import 사라짐. LangGraph 4노드·`run_relay` 무수정 | `pytest tests/test_relay.py` 통과 | 6.1 | cc:완료 |
+| 6.3 | `docker/Dockerfile.runtime` — 얇은 런타임(apt 5개). 웨이트·venv·코드는 호스트에 남기고 bind mount | `--smoke` 통과 | - | cc:완료 |
+| 6.4 | `scripts/start_llava_sandbox.sh` — `--check/--smoke/--up/--down` | `--smoke`가 이미지 안에서 호스트 venv import 성공 | 6.3 | cc:완료 |
+| 6.5 | 샌드박스 실기동 + E2E(`/health` loaded:true, relay 4단계 전체) | :8506 응답 + 파이프라인 1회 완주 | 6.4 | cc:완료 |
+
+**진행 메모**:
+- `--smoke` 실측: `3.12.3 2.13.0+cu130 5.14.1 8506` — 호스트 venv가 얇은 이미지 안에서 그대로 돌고 `llava_server` import 성공. 이 설계의 유일한 가정이 검증됨.
+- `HF_HUB_OFFLINE=1` 필수. 아웃바운드 403이라 `from_pretrained`가 huggingface.co를 때리면 마운트한 웨이트를 두고도 실패한다.
+- 마운트는 전부 읽기전용. bind mount는 호스트 원본 그 자체라 쓰기를 열면 샌드박스가 웨이트를 덮어쓸 수 있다.
+- 마운트 경로는 샌드박스 안에서도 **호스트와 동일한 절대경로**여야 한다 — venv의 shebang과 `pyvenv.cfg`가 절대경로다.
+- **6.5 E2E 실측(2026-08-04)**: `--up` → `/health` `loaded:true` → relay 4단계 완주. 예측 `Edge-Ring 51.5%`, 4노드 + 한국어 번역까지 **99.1초**. 경로 전체가 살아 있음이 확인됨 — DINOv2(호스트) → LLaVA(샌드박스 :8506) → Qdrant 유사사례 → exaone3.5 번역(샌드박스 :11434).
+
+**실기동에서만 드러난 함정 2건** — 둘 다 기동도 `/health`도 통과하고 **첫 추론에서만** 터진다. 헬스체크로는 못 잡는다:
+
+| 증상 | 원인 | 해결 |
+|------|------|------|
+| `[Errno 13] Permission denied: '/home/sandbox/.triton'` | 샌드박스 로그인 유저가 sandbox 라 `$HOME`이 `/home/sandbox`인데 정책상 못 쓴다. torch가 첫 generate에 triton 캐시를 거기 만든다 | `HOME=/tmp` (정책상 이미 read_write). 라이브러리별 캐시 환경변수를 쫓아다니는 대신 HOME 하나로 계열 전체를 덮는다. HF 캐시는 `HF_HOME`으로 별도 고정 |
+| `Failed to find C compiler` → 이어서 `cuda_utils.c` 컴파일 실패 | torch가 triton 커널을 **런타임 JIT 컴파일**한다. 얇은 이미지에 gcc도 Python 헤더도 없었다 | Dockerfile에 `gcc` + `python3-dev` 추가 |
+
+DaolVision 런타임 이미지엔 이 둘이 없다. 거기 서비스들이 triton JIT 경로를 안 탈 뿐이고, 같은 이미지로 torch 모델을 새로 얹으면 똑같이 밟는다.
+
+**곁가지로 잡은 버그 (DaolVision `scripts/start_studio.sh`)**: 샌드박스 ollama가 `/api/tags`는
+200을 돌려주는데 **추론은 모든 모델이 실패**하고 있었다 —
+`error starting llama-server: llama-server binary not found`. ollama가 추론 러너를
+`/usr/local/lib/ollama`(llama-server + libggml*.so + cuda_v12/v13)로 분리했는데 마운트가
+`/usr/local/bin/ollama` 하나뿐이었다. 그 경로를 마운트에 추가해 해결. 이 프로젝트의
+`relay.translate_to_korean`(exaone3.5)과 `cases.embed`(nomic-embed-text)가 둘 다 이 서버를
+쓰므로 직접 영향. 검증: 임베딩 768차원 응답, exaone 번역 "가장자리 고리 결함" 정상,
+`tests/test_cases.py` 2건 복구. **교훈: 모델 목록만 보고 판정하면 이 실패는 못 잡는다.**
+`nomic-embed-text`는 호스트에서 pull해 `~/.ollama`에 넣었다(샌드박스는 인터넷이 막혀 pull 불가).
+
+---
+
 ## 참고 문서
 
 - `CONTEXT.md` — 도메인 용어집 (Wafer Map, Die, Defect Class, Digital Twin Feed)

@@ -12,3 +12,6 @@ scripts/ralph/runs/
 out/
 *.log
 .superpowers/
+
+# start_llava_sandbox.sh 가 생성하는 landlock 정책 (런타임 산출물)
+docker/policies/

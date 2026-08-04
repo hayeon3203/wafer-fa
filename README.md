@@ -22,6 +22,7 @@ Wafer Map은 원본 다이 테스트 결과 매트릭스이고, 화면에 보이
 |------|------|------|
 | `app.py` (Streamlit) | 8501 | Stage 1(분류)만 로컬 스모크테스트용 데모 |
 | `wafer_predict_server.py` | 8092 | ThingsBoard "Wafer Detail" 실행 버튼 API — 랜덤 샘플 뽑아 5단계 파이프라인 전체 실행, `pipeline_stage` 텔레메트리 순차 전송 |
+| `llava_server.py` | 8506 | LLaVA-1.5-7B 생성 서버. **OpenShell 샌드박스에서 격리 실행** (`scripts/start_llava_sandbox.sh`, ADR 0006) — relay는 여기에 HTTP로만 요청 |
 | `wafer_browser_server.py` | 8091 | ThingsBoard "Wafer Gallery" 위젯용 페이지네이션 썸네일 API (전체 172,950건) |
 | `equipment_log_server.py` | - | 가상 장비 로그 상관관계용 API (Phase 3) |
 | ThingsBoard | 8082 (직접), 8090 (nginx 리브랜딩 프록시) | 대시보드(Overview / Detail) |
@@ -130,6 +131,11 @@ Wafer Overview + Wafer Detail 대시보드 2개, 커스텀 위젯 4개가 생성
 ### 8. 서버 기동
 
 ```bash
+# LLaVA 모델 서버 (샌드박스 격리, :8506) — relay보다 먼저 띄울 것
+./scripts/start_llava_sandbox.sh --check   # 전제조건만 점검
+./scripts/start_llava_sandbox.sh --up
+curl -s 127.0.0.1:8506/health              # loaded:true 가 될 때까지 대기 (14GB 로딩)
+
 # 로컬 분류 데모 (Stage 1만)
 streamlit run app.py --server.port 8501
 
@@ -139,7 +145,11 @@ PYTHONPATH=src python3 -m daol_fascope.wafer_browser_server
 PYTHONPATH=src python3 -m daol_fascope.equipment_log_server
 ```
 
-첫 실행 시 `facebook/dinov2-base`, `llava-hf/llava-1.5-7b-hf`(~14GB)를 HuggingFace Hub에서 자동 다운로드함 — 인터넷 연결 필요, `~/.cache/huggingface/hub`에 캐시되어 이후 재다운로드 없음.
+샌드박스 없이 돌리려면 같은 모듈을 그냥 호스트에서 띄우면 된다 —
+`PYTHONPATH=src python3 -m daol_fascope.llava_server`. relay는 `LLAVA_URL`
+환경변수(기본 `http://localhost:8506`)만 보므로 어느 쪽이든 동작한다.
+
+첫 실행 시 `facebook/dinov2-base`, `llava-hf/llava-1.5-7b-hf`(~14GB)를 HuggingFace Hub에서 자동 다운로드함 — 인터넷 연결 필요, `~/.cache/huggingface/hub`에 캐시되어 이후 재다운로드 없음. 샌드박스는 아웃바운드가 막혀 있으므로 **다운로드는 호스트에서 미리 끝나 있어야 한다**.
 
 Kafka 실시간 스트리밍 스모크테스트(선택, Phase 4)는 `PYTHONPATH=src python3 -m daol_fascope.kafka_consumer`와 `kafka_producer`를 별도 프로세스로 기동 — 자세한 내용은 `Plans.md` Phase 4 참고.
 

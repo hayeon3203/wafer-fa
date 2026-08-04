@@ -1,14 +1,18 @@
+import base64
+import io
+import os
 from typing import Callable, TypedDict
 
 import requests
-import torch
 from langgraph.graph import END, StateGraph
 from PIL import Image
-from transformers import LlavaForConditionalGeneration, LlavaProcessor
 
 from daol_fascope.cases import search_cases
 
-LLAVA_MODEL = "llava-hf/llava-1.5-7b-hf"
+# The model itself lives in daol_fascope.llava_server, which runs in an
+# OpenShell sandbox (docs/adr/0006). This process only speaks HTTP to it, so
+# the relay stays light and keeps its own access to Qdrant/ThingsBoard.
+LLAVA_URL = os.environ.get("LLAVA_URL", "http://localhost:8506")
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 TRANSLATE_MODEL = "exaone3.5:7.8b"
 SEVERITY_LEVELS = ["CRITICAL", "MAJOR", "MINOR", "NONE"]
@@ -19,33 +23,17 @@ SEVERITY_KO = {
     "NONE": "해당없음 (NONE)",
 }
 
-_model = None
-_processor = None
-
-
-def _load_llava():
-    global _model, _processor
-    if _model is None:
-        _processor = LlavaProcessor.from_pretrained(LLAVA_MODEL)
-        _model = LlavaForConditionalGeneration.from_pretrained(
-            LLAVA_MODEL, dtype=torch.bfloat16, device_map="auto"
-        )
-        _model.eval()
-    return _model, _processor
-
-
 def generate(prompt: str, image: Image.Image | None = None, max_new_tokens: int = 200) -> str:
-    model, processor = _load_llava()
+    payload = {"prompt": prompt, "max_new_tokens": max_new_tokens}
     if image is not None:
-        full_prompt = f"USER: <image>\n{prompt}\nASSISTANT:"
-        inputs = processor(text=full_prompt, images=image, return_tensors="pt").to(model.device)
-    else:
-        full_prompt = f"USER: {prompt}\nASSISTANT:"
-        inputs = processor(text=full_prompt, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
-    text = processor.decode(output[0], skip_special_tokens=True)
-    return text.rsplit("ASSISTANT:", 1)[-1].strip()
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload["image_b64"] = base64.b64encode(buf.getvalue()).decode("ascii")
+    # Long timeout: a cold sandbox is still loading 14GB, and a 200-token
+    # generation on the wafer image is tens of seconds even when warm.
+    response = requests.post(f"{LLAVA_URL}/generate", json=payload, timeout=300)
+    response.raise_for_status()
+    return response.json()["text"]
 
 
 def translate_to_korean(text_en: str) -> str:

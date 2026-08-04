@@ -1,6 +1,50 @@
+import base64
+import io
+
 from PIL import Image
 
 from daol_fascope import relay
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_generate_posts_to_llava_server_and_returns_text(monkeypatch):
+    sent = {}
+
+    def fake_post(url, json=None, timeout=None):
+        sent["url"] = url
+        sent["json"] = json
+        return _FakeResponse({"text": "a ring near the edge"})
+
+    monkeypatch.setattr(relay.requests, "post", fake_post)
+
+    assert relay.generate("describe this", max_new_tokens=10) == "a ring near the edge"
+    assert sent["url"] == f"{relay.LLAVA_URL}/generate"
+    assert sent["json"] == {"prompt": "describe this", "max_new_tokens": 10}
+
+
+def test_generate_sends_image_as_base64_png(monkeypatch):
+    sent = {}
+
+    def fake_post(url, json=None, timeout=None):
+        sent.update(json)
+        return _FakeResponse({"text": "ok"})
+
+    monkeypatch.setattr(relay.requests, "post", fake_post)
+    relay.generate("look", image=Image.new("RGB", (8, 8), (0, 255, 0)))
+
+    decoded = Image.open(io.BytesIO(base64.b64decode(sent["image_b64"])))
+    assert decoded.size == (8, 8)
+    assert decoded.format == "PNG"
 
 
 def test_parse_severity_matches_known_levels():
