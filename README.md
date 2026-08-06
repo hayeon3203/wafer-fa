@@ -145,6 +145,24 @@ PYTHONPATH=src python3 -m daol_fascope.wafer_browser_server
 PYTHONPATH=src python3 -m daol_fascope.equipment_log_server
 ```
 
+예측 서버를 로그인 세션과 독립적으로 계속 실행하려면 사용자 systemd 서비스로
+등록한다. 서비스는 프로젝트의 `.env`를 자동으로 읽으므로
+`THINGSBOARD_DEVICE_TOKEN`을 설정한 뒤 재시작하면 된다.
+
+```bash
+install -Dm644 systemd/wafer-predict.service ~/.config/systemd/user/wafer-predict.service
+systemctl --user daemon-reload
+systemctl --user enable --now wafer-predict.service
+
+# 상태와 로그 확인
+systemctl --user status wafer-predict.service
+journalctl --user -u wafer-predict.service -f
+```
+
+`.env` 변경 후에는 `systemctl --user restart wafer-predict.service`로 환경변수를
+다시 읽힌다. SSH 로그아웃 후에도 사용자 서비스를 자동 기동해야 하는 서버라면
+관리자 권한으로 한 번 `sudo loginctl enable-linger "$USER"`를 실행한다.
+
 샌드박스 없이 돌리려면 같은 모듈을 그냥 호스트에서 띄우면 된다 —
 `PYTHONPATH=src python3 -m daol_fascope.llava_server`. relay는 `LLAVA_URL`
 환경변수(기본 `http://localhost:8506`)만 보므로 어느 쪽이든 동작한다.

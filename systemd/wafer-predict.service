@@ -1,0 +1,16 @@
+[Unit]
+Description=Wafer FA predict pipeline API (ThingsBoard "Wafer Detail" run button)
+Wants=network-online.target
+After=network-online.target wafer-llava-sandbox.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/daol-fascope
+Environment=PYTHONPATH=%h/daol-fascope/src
+EnvironmentFile=-%h/daol-fascope/.env
+ExecStart=%h/daol-fascope/.venv/bin/python -m daol_fascope.wafer_predict_server
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
