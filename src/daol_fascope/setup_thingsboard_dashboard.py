@@ -16,23 +16,6 @@ TB_USERNAME = os.environ["THINGSBOARD_ADMIN_USERNAME"]
 TB_PASSWORD = os.environ["THINGSBOARD_ADMIN_PASSWORD"]
 DEVICE_ID = os.environ["THINGSBOARD_DEVICE_ID"]
 
-TITLE_BAR_COLORS = {
-    "결함 검출 개요 (Defect Detection)": "#0b84e5",
-    "Wafer Yield Map (최근 웨이퍼)": "#2ecc71",
-    "Process Risk & Alerts (최근 원인분석)": "#e3262e",
-    "설비/공정 텔레메트리": "#0b84e5",
-    "센서 데이터 (현재 웨이퍼)": "#0b84e5",
-    "공정 위험 지표": "#e3262e",
-    "공정 단계 타임라인": "#f5a623",
-    "파이프라인 실행": "#f5a623",
-    "결함-센서 상관관계 (드래그해서 탐색)": "#0b84e5",
-    "Lot 선택 / 패턴별 웨이퍼 수 / Lot Trend": "#0b84e5",
-    "Composite 웨이퍼맵 히트맵 (패턴별 평균)": "#2ecc71",
-    "전체 웨이퍼 데이터": "#0b84e5",
-    "모델 임계값 슬라이더": "#f5a623",
-    "원인분석 (최근)": "#e3262e",
-}
-
 
 def login():
     resp = requests.post(
@@ -803,11 +786,6 @@ def entity_datasource(alias_id, keys):
 
 
 def widget(type_full_fqn, widget_type, size_x, size_y, row, col, config):
-    title_color = TITLE_BAR_COLORS.get(config.get("title"))
-    if title_color:
-        # ThingsBoard renders titleColor on the platform header.  The nginx
-        # theme uses the same title-to-category mapping for its background bar.
-        config = {**config, "titleColor": "#ffffff"}
     wid = str(uuid.uuid4())
     return wid, {
         "typeFullFqn": type_full_fqn,
@@ -851,10 +829,7 @@ def make_dashboard(title, alias_id, widgets):
                     },
                 }
             },
-            "settings": {
-                "showDashboardTitle": True,
-                "dashboardTitleColor": "#ffffff",
-            },
+            "settings": {},
         },
     }
 
@@ -1298,48 +1273,6 @@ def apply_detail_sensor_widgets():
     print("updated Wafer Detail dashboard id:", result["id"]["id"])
 
 
-def apply_title_palette():
-    """Apply white title text to the two existing dashboards and widgets.
-
-    Category-colored title backgrounds are supplied by the nginx theme because
-    ThingsBoard CE only persists the title foreground color in widget config.
-    """
-    token = login()
-    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    resp = requests.get(
-        f"{THINGSBOARD_URL}/api/tenant/dashboards?pageSize=50&page=0",
-        headers=headers,
-    )
-    resp.raise_for_status()
-
-    dashboards = {
-        item["title"]: item for item in resp.json()["data"]
-        if item["title"] in {"Wafer Overview", "Wafer Detail"}
-    }
-    missing = {"Wafer Overview", "Wafer Detail"} - dashboards.keys()
-    if missing:
-        raise RuntimeError(f"dashboard(s) not found: {', '.join(sorted(missing))}")
-
-    for title, summary in dashboards.items():
-        resp = requests.get(
-            f"{THINGSBOARD_URL}/api/dashboard/{summary['id']['id']}",
-            headers=headers,
-        )
-        resp.raise_for_status()
-        dashboard = resp.json()
-        settings = dashboard["configuration"].setdefault("settings", {})
-        settings.update({
-            "showDashboardTitle": True,
-            "dashboardTitleColor": "#ffffff",
-        })
-        for item in dashboard["configuration"]["widgets"].values():
-            config = item.get("config", {})
-            if config.get("title") in TITLE_BAR_COLORS:
-                config["titleColor"] = "#ffffff"
-        result = save_dashboard(token, dashboard)
-        print(f"updated {title} dashboard id:", result["id"]["id"])
-
-
 if __name__ == "__main__":
     if "--apply-pipeline-progress" in sys.argv:
         apply_pipeline_progress_widget()
@@ -1349,7 +1282,5 @@ if __name__ == "__main__":
         apply_correlation_scatter_widget()
     elif "--apply-detail-sensor-widgets" in sys.argv:
         apply_detail_sensor_widgets()
-    elif "--apply-title-palette" in sys.argv:
-        apply_title_palette()
     else:
         main()
