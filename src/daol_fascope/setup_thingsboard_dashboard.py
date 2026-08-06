@@ -773,6 +773,142 @@ self.onResize = function() {};
 self.onDestroy = function() {};
 """
 
+# ---------------------------------------------------------------------------
+# Custom widgets: Wafer Yield Map + Run Analysis, replacing the static
+# html_value_card versions of "Wafer Yield Map (최근 웨이퍼)" and "Process Risk &
+# Alerts (최근 원인분석)" on "Wafer Overview". html_value_card only does ${key}
+# string substitution -- it has no way to hide stale root_cause/severity/recipe
+# from a previous run while the current run's classify/relay is still in
+# flight, since those keys' latest telemetry values don't disappear on their
+# own. These two read result_status (wafer_predict_server.py sends
+# result_status=running immediately on sample pick, then done/error) and hide
+# the previous run's analysis text until this run's own result lands.
+# ---------------------------------------------------------------------------
+WAFER_YIELD_MAP_HTML = """
+<div class="ywm-wrap">
+  <img class="ywm-img" />
+  <div class="ywm-stat">
+    <div class="ywm-big"></div>
+    <div class="ywm-sub">Composite Yield</div>
+    <div class="ywm-meta"></div>
+  </div>
+</div>
+"""
+
+WAFER_YIELD_MAP_CSS = """
+.ywm-wrap { display:flex; align-items:center; justify-content:space-around; height:100%; font-family: Roboto, sans-serif; padding:12px; box-sizing:border-box; }
+.ywm-img { max-height: 85%; border-radius: 50%; border: 4px solid #f0f0f0; image-rendering: pixelated; image-rendering: crisp-edges; }
+.ywm-stat { text-align:center; }
+.ywm-stat .ywm-big { font-size: 42px; font-weight: 300; color:#2e7d32; }
+.ywm-stat .ywm-running { color:#ff9800; }
+.ywm-stat .ywm-sub { font-size: 13px; color:#888; margin-top:6px; }
+.ywm-stat .ywm-meta { font-size: 13px; color:#888; margin-top:6px; }
+"""
+
+WAFER_YIELD_MAP_JS = """
+function latestValue(ctx, keyIndex) {
+    var series = ctx.data && ctx.data[keyIndex] && ctx.data[keyIndex].data;
+    return series && series.length ? series[series.length - 1][1] : null;
+}
+
+self.onInit = function() { render(); };
+self.onDataUpdated = function() { render(); };
+
+function render() {
+    var container = self.ctx.$container[0];
+    if (!container) return;
+    var img = container.querySelector('.ywm-img');
+    var big = container.querySelector('.ywm-big');
+    var meta = container.querySelector('.ywm-meta');
+
+    var image = latestValue(self.ctx, 0);
+    var lotId = latestValue(self.ctx, 1);
+    var waferIndex = latestValue(self.ctx, 2);
+    var defectClass = latestValue(self.ctx, 3);
+    var confidence = latestValue(self.ctx, 4);
+    var dieYieldPct = latestValue(self.ctx, 5);
+    var resultStatus = latestValue(self.ctx, 6);
+
+    if (image) img.src = 'data:image/png;base64,' + image;
+
+    if (resultStatus === 'running') {
+        big.className = 'ywm-big ywm-running';
+        big.textContent = '분석 중...';
+        meta.textContent = (lotId != null ? 'lot ' + lotId : '') + (waferIndex != null ? ' #' + waferIndex : '');
+    } else {
+        big.className = 'ywm-big';
+        big.textContent = (dieYieldPct != null ? Number(dieYieldPct).toFixed(1) : '-') + '%';
+        var confText = confidence != null ? Number(confidence).toFixed(2) : '-';
+        meta.textContent = (defectClass || '-') + ' (' + confText + ') / lot ' + (lotId != null ? lotId : '-');
+    }
+}
+
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
+RUN_ANALYSIS_HTML = """
+<div class="ra2-wrap">
+  <div class="ra2-status"></div>
+  <h4>심각도</h4><div class="ra2-severity"></div>
+  <h4>원인 가설</h4><div class="ra2-root-cause"></div>
+  <h4>권장 조치</h4><div class="ra2-recipe"></div>
+</div>
+"""
+
+RUN_ANALYSIS_CSS = """
+.ra2-wrap { height:100%; overflow-y:auto; box-sizing:border-box; padding:12px; font-family: Roboto, sans-serif; font-size:13px; line-height:1.5; }
+.ra2-wrap h4 { margin: 10px 0 2px; font-size:12px; color:#888; text-transform:uppercase; }
+.ra2-status { font-size:13px; font-weight:600; }
+.ra2-status.ra2-running { color:#ff9800; }
+.ra2-status.ra2-error { color:#e53935; }
+"""
+
+RUN_ANALYSIS_JS = """
+function latestValue(ctx, keyIndex) {
+    var series = ctx.data && ctx.data[keyIndex] && ctx.data[keyIndex].data;
+    return series && series.length ? series[series.length - 1][1] : null;
+}
+
+self.onInit = function() { render(); };
+self.onDataUpdated = function() { render(); };
+
+function render() {
+    var container = self.ctx.$container[0];
+    if (!container) return;
+    var statusEl = container.querySelector('.ra2-status');
+    var sevEl = container.querySelector('.ra2-severity');
+    var rcEl = container.querySelector('.ra2-root-cause');
+    var recEl = container.querySelector('.ra2-recipe');
+
+    var resultStatus = latestValue(self.ctx, 0);
+    var severity = latestValue(self.ctx, 1);
+    var rootCause = latestValue(self.ctx, 2);
+    var recipe = latestValue(self.ctx, 3);
+    var errorNode = latestValue(self.ctx, 4);
+    var errorMessage = latestValue(self.ctx, 5);
+
+    if (resultStatus === 'running') {
+        statusEl.className = 'ra2-status ra2-running';
+        statusEl.textContent = '분석 중...';
+        sevEl.textContent = ''; rcEl.textContent = ''; recEl.textContent = '';
+    } else if (resultStatus === 'error') {
+        statusEl.className = 'ra2-status ra2-error';
+        statusEl.textContent = '실패 (' + (errorNode || '?') + '): ' + (errorMessage || '');
+        sevEl.textContent = ''; rcEl.textContent = ''; recEl.textContent = '';
+    } else {
+        statusEl.className = 'ra2-status';
+        statusEl.textContent = '';
+        sevEl.textContent = severity || '-';
+        rcEl.textContent = rootCause || '-';
+        recEl.textContent = recipe || '-';
+    }
+}
+
+self.onResize = function() {};
+self.onDestroy = function() {};
+"""
+
 
 def data_key(name, key_type="timeseries", label=None, extra=None):
     dk = {"name": name, "type": key_type, "label": label or name, "settings": {}}
@@ -1273,6 +1409,98 @@ def apply_detail_sensor_widgets():
     print("updated Wafer Detail dashboard id:", result["id"]["id"])
 
 
+def apply_run_sync_widgets():
+    """Replace "Wafer Yield Map (최근 웨이퍼)" and "Process Risk & Alerts (최근
+    원인분석)" on "Wafer Detail" with custom widgets that key off run_id/
+    result_status (wafer_predict_server.py, random-sample-dashboard-sync fix):
+    hide the previous run's analysis text while the current run is still
+    classifying/relaying instead of leaving stale root_cause/severity/recipe
+    on screen, and give the analysis card its own scrollbar so long text
+    doesn't require maximizing the widget to read.
+
+    Targets "Wafer Detail" (not "Wafer Overview") because that's where these
+    two widgets actually live in the deployed tenant -- same as
+    apply_pipeline_progress_widget/apply_detail_sensor_widgets above, which
+    already patch widgets by this same title despite them originating from
+    build_overview_dashboard()'s naming below.
+    """
+    token = login()
+    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/tenant/dashboards?pageSize=50&page=0", headers=headers)
+    resp.raise_for_status()
+    match = next((d for d in resp.json()["data"] if d["title"] == "Wafer Detail"), None)
+    if match is None:
+        raise RuntimeError('no dashboard titled "Wafer Detail" found -- check the live title first')
+
+    resp = requests.get(f"{THINGSBOARD_URL}/api/dashboard/{match['id']['id']}", headers=headers)
+    resp.raise_for_status()
+    dashboard = resp.json()
+
+    widgets = dashboard["configuration"]["widgets"]
+    entity_alias_id = next(iter(dashboard["configuration"]["entityAliases"]))
+
+    yield_map_fqn = create_widget_type(
+        token, "Daol FAScope Wafer Yield Map",
+        "Latest wafer image/identity/yield, dims to 'analyzing' while result_status=running",
+        WAFER_YIELD_MAP_HTML, WAFER_YIELD_MAP_CSS, WAFER_YIELD_MAP_JS, size_x=12, size_y=10,
+    )
+    run_analysis_fqn = create_widget_type(
+        token, "Daol FAScope Run Analysis",
+        "Latest description/root_cause/severity/recipe, hidden while result_status=running so it never shows a stale run's analysis",
+        RUN_ANALYSIS_HTML, RUN_ANALYSIS_CSS, RUN_ANALYSIS_JS, size_x=6, size_y=10,
+    )
+
+    targets = {
+        "Wafer Yield Map (최근 웨이퍼)": (
+            yield_map_fqn,
+            [
+                data_key("wafer_image", "timeseries", "wafer_image"),
+                data_key("lot_id", "timeseries", "lot_id"),
+                data_key("wafer_index", "timeseries", "wafer_index"),
+                data_key("defect_class", "timeseries", "defect_class"),
+                data_key("confidence", "timeseries", "confidence"),
+                data_key("die_yield_pct", "timeseries", "die_yield_pct"),
+                data_key("result_status", "timeseries", "result_status"),
+            ],
+        ),
+        "Process Risk & Alerts (최근 원인분석)": (
+            run_analysis_fqn,
+            [
+                data_key("result_status", "timeseries", "result_status"),
+                data_key("severity", "timeseries", "severity"),
+                data_key("root_cause", "timeseries", "root_cause"),
+                data_key("recipe", "timeseries", "recipe"),
+                data_key("pipeline_stage_error_node", "timeseries", "pipeline_stage_error_node"),
+                data_key("error_message", "timeseries", "error_message"),
+            ],
+        ),
+    }
+
+    for title, (fqn, keys) in targets.items():
+        target_id = next(
+            (wid for wid, w in widgets.items() if w.get("config", {}).get("title") == title),
+            None,
+        )
+        if target_id is None:
+            raise RuntimeError(f'no "{title}" widget on "Wafer Overview" -- title changed?')
+        old = widgets[target_id]
+        widgets[target_id] = {
+            **old,
+            "typeFullFqn": fqn,
+            "type": "latest",
+            "config": {
+                "datasources": [entity_datasource(entity_alias_id, keys)],
+                "title": title, "showTitle": True, "settings": {},
+            },
+        }
+
+    result = save_dashboard(token, dashboard)
+    print("updated Wafer Detail dashboard id:", result["id"]["id"])
+    print("yield_map_fqn:", yield_map_fqn)
+    print("run_analysis_fqn:", run_analysis_fqn)
+
+
 def revert_title_palette():
     """Undo a live `--apply-title-palette` push (color-coded title bars, white
     title text, tinted grid background) -- strips those keys so widgets/dashboard
@@ -1330,6 +1558,8 @@ if __name__ == "__main__":
         apply_correlation_scatter_widget()
     elif "--apply-detail-sensor-widgets" in sys.argv:
         apply_detail_sensor_widgets()
+    elif "--apply-run-sync-widgets" in sys.argv:
+        apply_run_sync_widgets()
     elif "--revert-title-palette" in sys.argv:
         revert_title_palette()
     else:

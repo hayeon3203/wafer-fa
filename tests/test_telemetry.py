@@ -107,3 +107,89 @@ def test_send_equipment_snapshot_posts_one_payload_per_wafer(monkeypatch):
 def test_send_equipment_snapshot_no_token_returns_false(monkeypatch):
     monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "")
     assert telemetry.send_equipment_snapshot([("feature_0", 1.0)]) is False
+
+
+def test_send_run_started_posts_identity_before_analysis_with_running_status(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    monkeypatch.setattr(telemetry, "THINGSBOARD_URL", "http://tb.local")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = True
+        result = telemetry.send_run_started(
+            run_id="run-1", lot_id="lot1", wafer_index=1,
+            wafer_image_b64="base64data", die_yield=0.5, started_at=100.0,
+        )
+    assert result is True
+    payload = mock_post.call_args[1]["json"]
+    assert payload["run_id"] == "run-1"
+    assert payload["lot_id"] == "lot1"
+    assert payload["wafer_index"] == 1
+    assert payload["wafer_image"] == "base64data"
+    assert payload["die_yield"] == 0.5
+    assert payload["die_yield_pct"] == 50.0
+    assert payload["pipeline_stage"] == "classify"
+    assert payload["result_status"] == "running"
+    assert payload["started_at"] == 100.0
+
+
+def test_send_run_error_posts_error_status_with_same_run_id(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = True
+        telemetry.send_run_error(
+            run_id="run-1", lot_id="lot1", wafer_index=1,
+            error_node="root_cause", error_message="llava down",
+        )
+    payload = mock_post.call_args[1]["json"]
+    assert payload == {
+        "run_id": "run-1",
+        "lot_id": "lot1",
+        "wafer_index": 1,
+        "pipeline_stage": "error",
+        "pipeline_stage_error_node": "root_cause",
+        "result_status": "error",
+        "error_message": "llava down",
+    }
+
+
+def test_send_classification_telemetry_includes_run_id_and_done_status(monkeypatch):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = True
+        telemetry.send_classification_telemetry(
+            run_id="run-1", lot_id="lot1", wafer_index=1, defect_label="Center",
+            confidence=0.9, probs={"Center": 0.9}, completed_at=200.0,
+        )
+    payload = mock_post.call_args[1]["json"]
+    assert payload["run_id"] == "run-1"
+    assert payload["pipeline_stage"] == "done"
+    assert payload["result_status"] == "done"
+    assert payload["completed_at"] == 200.0
+
+
+def test_post_failure_logs_status_and_body(monkeypatch, capsys):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    with patch.object(telemetry.requests, "post") as mock_post:
+        mock_post.return_value.ok = False
+        mock_post.return_value.status_code = 500
+        mock_post.return_value.text = "internal error"
+        result = telemetry._post({"pipeline_stage": "done"})
+    assert result is False
+    err = capsys.readouterr().out
+    assert "[telemetry]" in err and "500" in err and "internal error" in err
+
+
+def test_post_network_error_logs(monkeypatch, capsys):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "tok123")
+    with patch.object(telemetry.requests, "post", side_effect=requests.RequestException("boom")):
+        result = telemetry._post({"pipeline_stage": "done"})
+    assert result is False
+    out = capsys.readouterr().out
+    assert "[telemetry]" in out and "boom" in out
+
+
+def test_post_no_token_logs(monkeypatch, capsys):
+    monkeypatch.setattr(telemetry, "THINGSBOARD_DEVICE_TOKEN", "")
+    result = telemetry._post({"pipeline_stage": "done"})
+    assert result is False
+    out = capsys.readouterr().out
+    assert "[telemetry]" in out and "THINGSBOARD_DEVICE_TOKEN" in out
