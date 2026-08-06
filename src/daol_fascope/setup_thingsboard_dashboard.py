@@ -1273,6 +1273,54 @@ def apply_detail_sensor_widgets():
     print("updated Wafer Detail dashboard id:", result["id"]["id"])
 
 
+def revert_title_palette():
+    """Undo a live `--apply-title-palette` push (color-coded title bars, white
+    title text, tinted grid background) -- strips those keys so widgets/dashboard
+    fall back to ThingsBoard's own defaults, same as a fresh `main()` build.
+    """
+    token = login()
+    headers = {"X-Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    resp = requests.get(
+        f"{THINGSBOARD_URL}/api/tenant/dashboards?pageSize=50&page=0",
+        headers=headers,
+    )
+    resp.raise_for_status()
+
+    dashboards = {
+        item["title"]: item for item in resp.json()["data"]
+        if item["title"] in {"Wafer Overview", "Wafer Detail"}
+    }
+    missing = {"Wafer Overview", "Wafer Detail"} - dashboards.keys()
+    if missing:
+        raise RuntimeError(f"dashboard(s) not found: {', '.join(sorted(missing))}")
+
+    for title, summary in dashboards.items():
+        resp = requests.get(
+            f"{THINGSBOARD_URL}/api/dashboard/{summary['id']['id']}",
+            headers=headers,
+        )
+        resp.raise_for_status()
+        dashboard = resp.json()
+
+        settings = dashboard["configuration"].get("settings", {})
+        settings.pop("dashboardTitleColor", None)
+        settings.pop("showDashboardTitle", None)
+
+        for layout in dashboard["configuration"]["states"]["default"]["layouts"].values():
+            grid = layout.get("gridSettings", {})
+            if grid.get("backgroundColor") not in (None, "#fff"):
+                grid["backgroundColor"] = "#fff"
+
+        changed = 0
+        for item in dashboard["configuration"]["widgets"].values():
+            config = item.get("config", {})
+            if config.pop("titleColor", None) is not None:
+                changed += 1
+
+        result = save_dashboard(token, dashboard)
+        print(f"reverted {title} dashboard id: {result['id']['id']} ({changed} widget titleColor cleared)")
+
+
 if __name__ == "__main__":
     if "--apply-pipeline-progress" in sys.argv:
         apply_pipeline_progress_widget()
@@ -1282,5 +1330,7 @@ if __name__ == "__main__":
         apply_correlation_scatter_widget()
     elif "--apply-detail-sensor-widgets" in sys.argv:
         apply_detail_sensor_widgets()
+    elif "--revert-title-palette" in sys.argv:
+        revert_title_palette()
     else:
         main()
