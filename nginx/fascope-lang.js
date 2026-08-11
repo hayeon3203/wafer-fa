@@ -58,6 +58,20 @@
     "센서 검색 (예: feature_162)": "Search sensor (e.g. feature_162)"
   };
 
+  var DYNAMIC_RULES = [
+    [/^(\d+) \/ (\d+) 웨이퍼 로드됨$/, "$1 / $2 wafers loaded"],
+    [/ 연결 실패 — 서버 가동 여부 확인 필요$/, " connection failed — check whether the server is running"],
+    [/ 연결 실패$/, " connection failed"],
+    [/^요청 실패 \((.+)\)$/, "request failed ($1)"],
+    [/^(.+) vs (.+) \((\d+)개 웨이퍼, 클래스당 최대 200개 샘플\)$/, "$1 vs $2 ($3 wafers, max 200 samples per class)"],
+    [/^(.+) 소유 센서 (\d+)개 \(wafer (.+)\)$/, "$2 sensors owned by $1 (wafer $3)"],
+    [/^정상 범위 \(\|σ\|>(.+) 센서 없음\)$/, "normal range (no sensors with |σ|>$1)"],
+    [/^⚠ (\d+)개 센서 임계치\(\|σ\|>(.+)\) 초과$/, "⚠ $1 sensors over threshold (|σ|>$2)"],
+    [/^실패 \((.+?)\):\s*(.*)$/, "failed ($1): $2"],
+    [/^(\d+)개 lot 중 상위 50개 표시 \(검색으로 좁히기\)$/, "$1 lots found — showing top 50 (narrow your search)"],
+    [/\(값 ([^)]+)\)/, "(value $1)"]
+  ];
+
   function translateFragment(raw) {
     var trimmed = raw.trim();
     if (!trimmed) return null;
@@ -66,6 +80,13 @@
     var out = null;
     if (Object.prototype.hasOwnProperty.call(STATIC_DICT, trimmed)) {
       out = STATIC_DICT[trimmed];
+    } else {
+      for (var i = 0; i < DYNAMIC_RULES.length; i++) {
+        if (DYNAMIC_RULES[i][0].test(trimmed)) {
+          out = trimmed.replace(DYNAMIC_RULES[i][0], DYNAMIC_RULES[i][1]);
+          break;
+        }
+      }
     }
     return out === null ? null : lead + out + trail;
   }
