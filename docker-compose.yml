@@ -93,6 +93,7 @@ services:
       - ./nginx/waferscope.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/waferscope.ico:/etc/nginx/custom/waferscope.ico:ro
       - ./nginx/logo_title_white.svg:/etc/nginx/custom/logo_title_white.svg:ro
+      - ./nginx/fascope-lang.js:/etc/nginx/custom/fascope-lang.js:ro
 
 volumes:
   # name: 은 wafer-fa -> daol-fascope repo rename(2026-07-23) 이전 볼륨명을 그대로
