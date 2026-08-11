@@ -232,7 +232,17 @@
     applyTranslations();
   }
 
-  new MutationObserver(sweep).observe(document.documentElement, { childList: true, subtree: true });
+  var sweepScheduled = false;
+  function scheduleSweep() {
+    if (sweepScheduled) return;
+    sweepScheduled = true;
+    requestAnimationFrame(function () {
+      sweepScheduled = false;
+      sweep();
+    });
+  }
+
+  new MutationObserver(scheduleSweep).observe(document.documentElement, { childList: true, subtree: true });
   setCollapsed(localStorage.getItem(KEY) === "1");
   sweep();
 })();
