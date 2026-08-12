@@ -55,7 +55,15 @@
     "이미 실행 중입니다": "Already running",
     "데이터 없음": "No data",
     "lot 검색 (예: lot123)": "Search lot (e.g. lot123)",
-    "센서 검색 (예: feature_162)": "Search sensor (e.g. feature_162)"
+    "센서 검색 (예: feature_162)": "Search sensor (e.g. feature_162)",
+    "홈": "Home",
+    "알람": "Alarms",
+    "대시보드": "Dashboards",
+    "개체": "Entities",
+    "커스터머": "Customers",
+    "규칙 사슬": "Rule chains",
+    "위젯 라이브러리": "Widgets library",
+    "Api 사용량": "API usage"
   };
 
   var DYNAMIC_RULES = [
@@ -179,13 +187,20 @@
   }
 
   function ensureLangToggle() {
-    if (document.getElementById("fascope-lang-toggle")) {
+    var toolbar = document.querySelector("mat-toolbar.tb-primary-toolbar");
+    if (!toolbar) return;
+    var anchor =
+      toolbar.querySelector("tb-github-badge") ||
+      toolbar.querySelector("tb-notification-bell") ||
+      toolbar.querySelector("tb-user-menu");
+
+    var b = document.getElementById("fascope-lang-toggle");
+    if (b) {
+      if (anchor && b.nextSibling !== anchor) toolbar.insertBefore(b, anchor);
       updateLangToggleLabel();
       return;
     }
-    var bar = document.querySelector("mat-sidenav.tb-site-sidenav .tb-nav-header-toolbar");
-    if (!bar) return;
-    var b = document.createElement("button");
+    b = document.createElement("button");
     b.id = "fascope-lang-toggle";
     b.type = "button";
     b.title = "Switch language";
@@ -193,7 +208,8 @@
       e.stopPropagation();
       setLang(getLang() === "en" ? "ko" : "en");
     });
-    bar.appendChild(b);
+    if (anchor) toolbar.insertBefore(b, anchor);
+    else toolbar.appendChild(b);
     updateLangToggleLabel();
   }
 
